@@ -1,0 +1,6 @@
+{
+  "name": "双云协同销售作战平台",
+  "description": "基于《知识云 × 实践云》方法论的企业数字化营销平台，沉淀工厂产品与工艺标准知识，结构化留存测试打样与验证实践经验，助力销售现场实现即时、专业的需求诊断、选膜推荐、报价决策及效果求证。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
