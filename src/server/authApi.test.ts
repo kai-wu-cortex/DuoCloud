@@ -97,6 +97,11 @@ test('verifyPasswordHash accepts only matching salt and password', () => {
   assert.equal(verifyPasswordHash('wrong', salt, passwordHash), false);
 });
 
+test('hashPassword is stable for setup script compatibility', () => {
+  assert.equal(hashPassword('secret', 'salt'), hashPassword('secret', 'salt'));
+  assert.notEqual(hashPassword('secret', 'salt'), hashPassword('secret', 'other-salt'));
+});
+
 test('POST /api/login returns session user and emits Set-Cookie', async () => {
   process.env.SESSION_SECRET = 'session-secret';
   const user: SystemUserDoc = {
