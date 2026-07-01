@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
-import type { Collection, Document, Filter } from 'mongodb';
+import type { Collection, Document, Filter, OptionalId, ReplaceOptions } from 'mongodb';
+import { KNOWLEDGE_FIELD_SCHEMAS } from '../lib/knowledgeFieldSchemas';
 import { getMongoCollection } from '../lib/mongodb';
 import type { KnowledgeAsset, KnowledgeTableType } from '../types';
 import {
@@ -27,7 +28,6 @@ const KNOWLEDGE_CATEGORIES: readonly KnowledgeTableType[] = [
   'knowledge_governance',
 ];
 
-type KnowledgeAssetRecord = Omit<KnowledgeAsset, 'createdAt' | 'updatedAt' | 'source' | 'version'>;
 type KnowledgeAssetSource = 'duocloud' | 'obsidian_import' | 'external_update_app';
 type KnowledgeAssetStatus = 'active' | 'archived' | 'draft';
 type KnowledgeAssetOperation = 'create' | 'update' | 'delete' | 'bulk-import';
@@ -37,16 +37,19 @@ interface KnowledgeAssetActor {
   username: string;
 }
 
-export type KnowledgeAssetDocument = Document & KnowledgeAssetRecord & {
+export interface KnowledgeAssetServerMetadata {
+  serverStatus: KnowledgeAssetStatus;
+  serverSource: KnowledgeAssetSource;
+  serverVersion: number;
+  serverCreatedAt: Date;
+  serverUpdatedAt: Date;
+  serverCreatedBy?: KnowledgeAssetActor;
+  serverUpdatedBy?: KnowledgeAssetActor;
+  serverDeletedAt?: Date;
+}
+
+export type KnowledgeAssetDocument = Document & KnowledgeAsset & KnowledgeAssetServerMetadata & {
   _id: string;
-  status: KnowledgeAssetStatus;
-  source: KnowledgeAssetSource;
-  version: number;
-  createdAt: Date;
-  updatedAt: Date;
-  createdBy?: KnowledgeAssetActor;
-  updatedBy?: KnowledgeAssetActor;
-  deletedAt?: Date;
 };
 
 interface KnowledgeAssetRevisionDocument extends Document {
@@ -59,6 +62,7 @@ interface KnowledgeAssetRevisionDocument extends Document {
 }
 
 interface KnowledgeAssetImportJobDocument extends Document {
+  _id?: string;
   source: KnowledgeAssetSource;
   input: string;
   status: 'running' | 'completed';
@@ -72,6 +76,45 @@ interface KnowledgeAssetImportJobDocument extends Document {
   };
   errors: Array<{ id: string; message: string }>;
 }
+
+type FindCursor<T> = {
+  sort(sortSpec: Record<string, 1 | -1>): { toArray(): Promise<T[]> };
+  toArray(): Promise<T[]>;
+};
+
+type ReplaceOneResult = {
+  acknowledged: boolean;
+  matchedCount: number;
+  modifiedCount: number;
+  upsertedCount: number;
+};
+
+type InsertOneResult = {
+  acknowledged: boolean;
+  insertedId: unknown;
+};
+
+type UpdateOneResult = {
+  acknowledged: boolean;
+  matchedCount: number;
+  modifiedCount: number;
+};
+
+interface KnowledgeAssetCollectionLike<T extends Document> {
+  findOne(filter: Filter<T>): Promise<T | null>;
+  find(filter: Filter<T>): FindCursor<T>;
+  replaceOne(filter: Filter<T>, replacement: T, options?: ReplaceOptions): Promise<ReplaceOneResult>;
+  insertOne(document: OptionalId<T>): Promise<InsertOneResult>;
+  updateOne(filter: Filter<T>, update: { $set: Partial<T> }): Promise<UpdateOneResult>;
+}
+
+interface KnowledgeAssetCollectionResolvers {
+  knowledgeAssets?: () => Promise<KnowledgeAssetCollectionLike<KnowledgeAssetDocument>>;
+  revisions?: () => Promise<KnowledgeAssetCollectionLike<KnowledgeAssetRevisionDocument>>;
+  importJobs?: () => Promise<KnowledgeAssetCollectionLike<KnowledgeAssetImportJobDocument>>;
+}
+
+let collectionResolversForTests: KnowledgeAssetCollectionResolvers | null = null;
 
 class KnowledgeAssetApiError extends Error {
   readonly statusCode: number;
@@ -89,6 +132,12 @@ interface BulkRequestBody {
   assets?: unknown;
   source?: unknown;
   input?: unknown;
+}
+
+export function setKnowledgeAssetApiCollectionsForTests(
+  resolvers: KnowledgeAssetCollectionResolvers | null,
+): void {
+  collectionResolversForTests = resolvers;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -118,11 +167,14 @@ function isKnowledgeCategory(value: unknown): value is KnowledgeTableType {
   return typeof value === 'string' && KNOWLEDGE_CATEGORIES.includes(value as KnowledgeTableType);
 }
 
+function getRequiredCategoryFields(category: KnowledgeTableType) {
+  return KNOWLEDGE_FIELD_SCHEMAS[category].fields.filter(field => field.required);
+}
+
 function ensureNormalizedKnowledgeAsset(value: unknown): KnowledgeAsset {
   const validation = validateKnowledgeAssetPayload(value);
   if ('message' in validation) {
-    const message = validation.message;
-    throw new KnowledgeAssetApiError(422, 'VALIDATION_ERROR', message);
+    throw new KnowledgeAssetApiError(422, 'VALIDATION_ERROR', validation.message);
   }
 
   const record = value as KnowledgeAsset;
@@ -151,14 +203,14 @@ function getKnowledgeAssetIdFromRequest(req: Pick<Request, 'query'>): string {
 function stripKnowledgeAssetMetadata(document: KnowledgeAssetDocument): KnowledgeAsset {
   const {
     _id: _ignoredId,
-    status: _ignoredStatus,
-    source: _ignoredSource,
-    version: _ignoredVersion,
-    createdAt: _ignoredCreatedAt,
-    updatedAt: _ignoredUpdatedAt,
-    createdBy: _ignoredCreatedBy,
-    updatedBy: _ignoredUpdatedBy,
-    deletedAt: _ignoredDeletedAt,
+    serverStatus: _ignoredStatus,
+    serverSource: _ignoredSource,
+    serverVersion: _ignoredVersion,
+    serverCreatedAt: _ignoredCreatedAt,
+    serverUpdatedAt: _ignoredUpdatedAt,
+    serverCreatedBy: _ignoredCreatedBy,
+    serverUpdatedBy: _ignoredUpdatedBy,
+    serverDeletedAt: _ignoredDeletedAt,
     ...asset
   } = document;
 
@@ -169,21 +221,34 @@ function isSameKnowledgeAssetContent(
   existing: KnowledgeAssetDocument,
   incoming: KnowledgeAsset,
 ): boolean {
-  const current = JSON.stringify(stripKnowledgeAssetMetadata(existing));
-  const next = JSON.stringify(incoming);
-  return current === next;
+  return JSON.stringify(stripKnowledgeAssetMetadata(existing)) === JSON.stringify(incoming);
 }
 
-async function getKnowledgeAssetsCollection(): Promise<Collection<KnowledgeAssetDocument>> {
-  return getMongoCollection<KnowledgeAssetDocument>(KNOWLEDGE_COLLECTION);
+async function getKnowledgeAssetsCollection(): Promise<KnowledgeAssetCollectionLike<KnowledgeAssetDocument>> {
+  if (collectionResolversForTests?.knowledgeAssets) {
+    return collectionResolversForTests.knowledgeAssets();
+  }
+  return getMongoCollection<KnowledgeAssetDocument>(KNOWLEDGE_COLLECTION) as Promise<
+    Collection<KnowledgeAssetDocument>
+  >;
 }
 
-async function getKnowledgeAssetRevisionsCollection(): Promise<Collection<KnowledgeAssetRevisionDocument>> {
-  return getMongoCollection<KnowledgeAssetRevisionDocument>(REVISION_COLLECTION);
+async function getKnowledgeAssetRevisionsCollection(): Promise<KnowledgeAssetCollectionLike<KnowledgeAssetRevisionDocument>> {
+  if (collectionResolversForTests?.revisions) {
+    return collectionResolversForTests.revisions();
+  }
+  return getMongoCollection<KnowledgeAssetRevisionDocument>(REVISION_COLLECTION) as Promise<
+    Collection<KnowledgeAssetRevisionDocument>
+  >;
 }
 
-async function getKnowledgeAssetImportJobsCollection(): Promise<Collection<KnowledgeAssetImportJobDocument>> {
-  return getMongoCollection<KnowledgeAssetImportJobDocument>(IMPORT_JOB_COLLECTION);
+async function getKnowledgeAssetImportJobsCollection(): Promise<KnowledgeAssetCollectionLike<KnowledgeAssetImportJobDocument>> {
+  if (collectionResolversForTests?.importJobs) {
+    return collectionResolversForTests.importJobs();
+  }
+  return getMongoCollection<KnowledgeAssetImportJobDocument>(IMPORT_JOB_COLLECTION) as Promise<
+    Collection<KnowledgeAssetImportJobDocument>
+  >;
 }
 
 async function writeRevision(
@@ -207,8 +272,8 @@ async function writeRevision(
 
 function buildActiveFilter(id?: string): Filter<KnowledgeAssetDocument> {
   const filter: Filter<KnowledgeAssetDocument> = {
-    status: { $ne: 'archived' },
-    deletedAt: { $exists: false },
+    serverStatus: { $ne: 'archived' },
+    serverDeletedAt: { $exists: false },
   };
   if (id) {
     filter._id = id;
@@ -221,8 +286,10 @@ async function findActiveAssetById(id: string): Promise<KnowledgeAssetDocument |
   return collection.findOne(buildActiveFilter(id));
 }
 
-function getRequestVersion(body: Record<string, unknown>): number | null {
-  return typeof body.version === 'number' && Number.isFinite(body.version) ? body.version : null;
+function getRequestServerVersion(body: Record<string, unknown>): number | null {
+  return typeof body.serverVersion === 'number' && Number.isFinite(body.serverVersion)
+    ? body.serverVersion
+    : null;
 }
 
 function sendKnowledgeJson(
@@ -294,6 +361,15 @@ export function validateKnowledgeAssetPayload(
     return { valid: false, message: 'VALIDATION_ERROR: content must be a string.' };
   }
 
+  for (const field of getRequiredCategoryFields(record.category)) {
+    if (typeof record[field.name] !== 'string' || !(record[field.name] as string).trim()) {
+      return {
+        valid: false,
+        message: `VALIDATION_ERROR: ${field.name} (${field.label}) is required.`,
+      };
+    }
+  }
+
   return { valid: true };
 }
 
@@ -303,7 +379,9 @@ export function applyKnowledgeAssetUpdate(
     actor: SessionUser;
     now?: Date;
     existingVersion?: number;
-    source: KnowledgeAssetDocument['source'];
+    source: KnowledgeAssetSource;
+    existingCreatedAt?: Date;
+    existingCreatedBy?: KnowledgeAssetActor;
   },
 ): KnowledgeAssetDocument {
   const now = options.now ?? new Date();
@@ -315,13 +393,13 @@ export function applyKnowledgeAssetUpdate(
     id: normalizeKnowledgeAssetId(asset.id),
     tags: asset.tags.map(tag => tag.trim()).filter(Boolean),
     lastUpdated: formatDateOnly(now),
-    status: 'active',
-    source: options.source,
-    version: (options.existingVersion ?? 0) + 1,
-    createdAt: now,
-    updatedAt: now,
-    createdBy: actor,
-    updatedBy: actor,
+    serverStatus: 'active',
+    serverSource: options.source,
+    serverVersion: (options.existingVersion ?? 0) + 1,
+    serverCreatedAt: options.existingCreatedAt ?? now,
+    serverUpdatedAt: now,
+    serverCreatedBy: options.existingCreatedBy ?? actor,
+    serverUpdatedBy: actor,
   };
 }
 
@@ -351,7 +429,7 @@ export async function handleKnowledgeAssetsRequest(
       ];
     }
 
-    const items = await collection.find(filter).sort({ updatedAt: -1, _id: 1 }).toArray();
+    const items = await collection.find(filter).sort({ serverUpdatedAt: -1, _id: 1 }).toArray();
     sendKnowledgeJson(res, 200, { success: true, data: items });
     return;
   }
@@ -361,7 +439,7 @@ export async function handleKnowledgeAssetsRequest(
     const incomingAsset = ensureNormalizedKnowledgeAsset(parseBody(req.body));
     const collection = await getKnowledgeAssetsCollection();
     const existing = await collection.findOne({ _id: incomingAsset.id });
-    if (existing && existing.status !== 'archived' && !existing.deletedAt) {
+    if (existing && existing.serverStatus !== 'archived' && !existing.serverDeletedAt) {
       throw new KnowledgeAssetApiError(409, 'CONFLICT', 'CONFLICT: 知识卡片已存在。');
     }
 
@@ -371,10 +449,9 @@ export async function handleKnowledgeAssetsRequest(
       now,
       existingVersion: 0,
       source: 'duocloud',
+      existingCreatedAt: existing?.serverCreatedAt,
+      existingCreatedBy: existing?.serverCreatedBy,
     });
-
-    if (existing?.createdAt) next.createdAt = existing.createdAt;
-    if (existing?.createdBy) next.createdBy = existing.createdBy;
 
     await collection.replaceOne({ _id: next._id }, next, { upsert: true });
     await writeRevision(next._id, 'create', actor, existing, next, now);
@@ -405,17 +482,18 @@ export async function handleKnowledgeAssetDocumentRequest(
   if (req.method === 'PUT') {
     const actor = requireRole(req, secret, ['editor', 'admin']);
     const rawBody = asRecord(parseBody(req.body)) ?? {};
-    const currentVersion = getRequestVersion(rawBody);
-    if (currentVersion === null) {
-      throw new KnowledgeAssetApiError(422, 'VALIDATION_ERROR', 'VALIDATION_ERROR: version is required.');
+    const expectedServerVersion = getRequestServerVersion(rawBody);
+    if (expectedServerVersion === null) {
+      throw new KnowledgeAssetApiError(
+        422,
+        'VALIDATION_ERROR',
+        'VALIDATION_ERROR: serverVersion is required.',
+      );
     }
 
     const existing = await findActiveAssetById(id);
     if (!existing) {
       throw new KnowledgeAssetApiError(404, 'NOT_FOUND', 'NOT_FOUND: 未找到知识卡片。');
-    }
-    if (existing.version !== currentVersion) {
-      throw new KnowledgeAssetApiError(409, 'CONFLICT', 'CONFLICT: version mismatch.');
     }
 
     const incomingAsset = ensureNormalizedKnowledgeAsset({ ...rawBody, id });
@@ -423,14 +501,22 @@ export async function handleKnowledgeAssetDocumentRequest(
     const next = applyKnowledgeAssetUpdate(incomingAsset, {
       actor,
       now,
-      existingVersion: existing.version,
-      source: 'duocloud',
+      existingVersion: expectedServerVersion,
+      source: existing.serverSource,
+      existingCreatedAt: existing.serverCreatedAt,
+      existingCreatedBy: existing.serverCreatedBy,
     });
-    next.createdAt = existing.createdAt;
-    next.createdBy = existing.createdBy;
 
     const collection = await getKnowledgeAssetsCollection();
-    await collection.replaceOne({ _id: id }, next);
+    const replaceResult = await collection.replaceOne(
+      { _id: id, serverVersion: expectedServerVersion, serverStatus: { $ne: 'archived' } },
+      next,
+    );
+
+    if (replaceResult.matchedCount === 0) {
+      throw new KnowledgeAssetApiError(409, 'CONFLICT', 'CONFLICT: serverVersion mismatch.');
+    }
+
     await writeRevision(id, 'update', actor, existing, next, now);
     sendKnowledgeJson(res, 200, { success: true, data: next });
     return;
@@ -446,16 +532,23 @@ export async function handleKnowledgeAssetDocumentRequest(
     const now = new Date();
     const archived: KnowledgeAssetDocument = {
       ...existing,
-      status: 'archived',
-      deletedAt: now,
-      updatedAt: now,
-      updatedBy: toActor(actor),
+      serverStatus: 'archived',
+      serverDeletedAt: now,
+      serverUpdatedAt: now,
+      serverUpdatedBy: toActor(actor),
       lastUpdated: formatDateOnly(now),
-      version: existing.version + 1,
+      serverVersion: existing.serverVersion + 1,
     };
 
     const collection = await getKnowledgeAssetsCollection();
-    await collection.replaceOne({ _id: id }, archived);
+    const replaceResult = await collection.replaceOne(
+      { _id: id, serverVersion: existing.serverVersion, serverStatus: { $ne: 'archived' } },
+      archived,
+    );
+    if (replaceResult.matchedCount === 0) {
+      throw new KnowledgeAssetApiError(409, 'CONFLICT', 'CONFLICT: serverVersion mismatch.');
+    }
+
     await writeRevision(id, 'delete', actor, existing, archived, now);
     sendKnowledgeJson(res, 200, { success: true, data: archived });
     return;
@@ -504,7 +597,7 @@ export async function handleKnowledgeAssetBulkRequest(
       const asset = ensureNormalizedKnowledgeAsset(rawAsset);
       const existing = await collection.findOne({ _id: asset.id });
 
-      if (existing && existing.status !== 'archived' && !existing.deletedAt && isSameKnowledgeAssetContent(existing, asset)) {
+      if (existing && existing.serverStatus !== 'archived' && !existing.serverDeletedAt && isSameKnowledgeAssetContent(existing, asset)) {
         job.counts.skipped += 1;
         continue;
       }
@@ -513,16 +606,16 @@ export async function handleKnowledgeAssetBulkRequest(
       const next = applyKnowledgeAssetUpdate(asset, {
         actor,
         now,
-        existingVersion: existing?.status === 'archived' ? 0 : existing?.version ?? 0,
+        existingVersion: existing?.serverStatus === 'archived' ? 0 : existing?.serverVersion ?? 0,
         source,
+        existingCreatedAt: existing?.serverCreatedAt,
+        existingCreatedBy: existing?.serverCreatedBy,
       });
-      if (existing?.createdAt) next.createdAt = existing.createdAt;
-      if (existing?.createdBy) next.createdBy = existing.createdBy;
 
       await collection.replaceOne({ _id: next._id }, next, { upsert: true });
       await writeRevision(next._id, 'bulk-import', actor, existing, next, now);
 
-      if (existing && existing.status !== 'archived' && !existing.deletedAt) {
+      if (existing && existing.serverStatus !== 'archived' && !existing.serverDeletedAt) {
         job.counts.updated += 1;
       } else {
         job.counts.created += 1;
@@ -566,7 +659,7 @@ export async function handleKnowledgeAssetExportRequest(
 
   requireSession(req, getSessionSecret());
   const collection = await getKnowledgeAssetsCollection();
-  const items = await collection.find(buildActiveFilter()).sort({ updatedAt: -1, _id: 1 }).toArray();
+  const items = await collection.find(buildActiveFilter()).sort({ serverUpdatedAt: -1, _id: 1 }).toArray();
 
   sendKnowledgeJson(res, 200, {
     success: true,
