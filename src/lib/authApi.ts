@@ -6,6 +6,14 @@ export interface AuthUser {
   role: AuthRole;
 }
 
+function getErrorMessage(payload: unknown, fallback: string): string {
+  if (payload && typeof payload === 'object' && typeof (payload as { message?: unknown }).message === 'string') {
+    return (payload as { message: string }).message;
+  }
+
+  return fallback;
+}
+
 export function parseAuthResponse(payload: unknown): AuthUser {
   const value = payload as {
     success?: unknown;
@@ -52,8 +60,14 @@ export async function getDuoCloudSession(): Promise<AuthUser | null> {
 }
 
 export async function signOutOfDuoCloud(): Promise<void> {
-  await fetch('/api/logout', {
+  const response = await fetch('/api/logout', {
     method: 'POST',
     credentials: 'same-origin',
   });
+
+  const payload = await response.json();
+
+  if (!payload?.success) {
+    throw new Error(getErrorMessage(payload, '退出登录失败。'));
+  }
 }

@@ -161,13 +161,17 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
+    setAuthError(null);
+
     try {
       await signOutOfDuoCloud();
-    } finally {
       setAuthUser(null);
       setAuthError(null);
       setAuthStatus('unauthenticated');
       setIsMobileMenuOpen(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '退出登录失败。';
+      setAuthError(message);
     }
   };
 
@@ -350,6 +354,11 @@ export default function App() {
 
         {/* Primary Viewport Pane */}
         <main className="flex-1 overflow-y-auto bg-background p-4 md:p-6" id="primary-viewport">
+          {authError && (
+            <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+              {authError}
+            </div>
+          )}
           <Suspense fallback={<div className="h-full min-h-[360px] flex items-center justify-center text-sm font-bold text-on-surface-variant">正在加载双云工作台...</div>}>
             {activeTab === 'toolkit' && (
               <CombatToolkit 
