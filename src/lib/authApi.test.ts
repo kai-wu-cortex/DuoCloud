@@ -77,8 +77,9 @@ test('signOutOfDuoCloud posts with same-origin cookies', async () => {
   globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
     request = { input, init };
     return {
+      ok: true,
       json: async () => ({ success: true }),
-    } as Response;
+    } as unknown as Response;
   }) as typeof fetch;
 
   await signOutOfDuoCloud();
@@ -94,11 +95,37 @@ test('signOutOfDuoCloud posts with same-origin cookies', async () => {
 
 test('signOutOfDuoCloud throws a readable error when logout fails', async () => {
   globalThis.fetch = (async () => ({
+    ok: false,
     json: async () => ({ success: false, message: '退出失败，请稍后重试。' }),
-  }) as Response) as typeof fetch;
+  }) as unknown as Response) as typeof fetch;
 
   await assert.rejects(
     () => signOutOfDuoCloud(),
     /退出失败，请稍后重试/,
+  );
+});
+
+test('signOutOfDuoCloud throws a readable error when logout returns invalid JSON', async () => {
+  globalThis.fetch = (async () => ({
+    ok: true,
+    json: async () => {
+      throw new SyntaxError('Unexpected end of JSON input');
+    },
+  }) as unknown as Response) as typeof fetch;
+
+  await assert.rejects(
+    () => signOutOfDuoCloud(),
+    /退出登录失败，请稍后重试/,
+  );
+});
+
+test('signOutOfDuoCloud throws a readable error when logout request fails', async () => {
+  globalThis.fetch = (async () => {
+    throw new TypeError('fetch failed');
+  }) as typeof fetch;
+
+  await assert.rejects(
+    () => signOutOfDuoCloud(),
+    /退出登录失败，请检查网络连接后重试/,
   );
 });

@@ -14,6 +14,14 @@ function getErrorMessage(payload: unknown, fallback: string): string {
   return fallback;
 }
 
+async function readJsonPayload(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
 export function parseAuthResponse(payload: unknown): AuthUser {
   const value = payload as {
     success?: unknown;
@@ -60,14 +68,24 @@ export async function getDuoCloudSession(): Promise<AuthUser | null> {
 }
 
 export async function signOutOfDuoCloud(): Promise<void> {
-  const response = await fetch('/api/logout', {
-    method: 'POST',
-    credentials: 'same-origin',
-  });
+  let response: Response;
 
-  const payload = await response.json();
+  try {
+    response = await fetch('/api/logout', {
+      method: 'POST',
+      credentials: 'same-origin',
+    });
+  } catch {
+    throw new Error('退出登录失败，请检查网络连接后重试。');
+  }
 
-  if (!payload?.success) {
-    throw new Error(getErrorMessage(payload, '退出登录失败。'));
+  const payload = await readJsonPayload(response);
+
+  if (response.ok === false) {
+    throw new Error(getErrorMessage(payload, '退出登录失败，请稍后重试。'));
+  }
+
+  if (!payload || typeof payload !== 'object' || !(payload as { success?: unknown }).success) {
+    throw new Error(getErrorMessage(payload, '退出登录失败，请稍后重试。'));
   }
 }
