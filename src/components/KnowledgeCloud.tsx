@@ -4,7 +4,7 @@ import {
   Search, BookOpen, Plus, Tag, Calendar, User, Filter, Sliders, DollarSign, ShieldAlert, Truck, MessageSquare, Layers, X, PlusCircle, CheckCircle2,
   Box, Puzzle, BookText, AlertTriangle, HelpCircle, MoreHorizontal, FileText, Video,
   LayoutGrid, List as ListIcon, Folder, Sparkles, Pencil,
-  Bold, Italic, Underline, Link, Image as ImageIcon, Paperclip, ExternalLink, Upload, Download, Code2, Eye, Maximize2, Save, RotateCcw
+  Bold, Italic, Underline, Link, Image as ImageIcon, Paperclip, ExternalLink, Upload, Download, Code2, Eye, Maximize2, Save, RotateCcw, Trash2
 } from 'lucide-react';
 import { KnowledgeAsset, KnowledgeTableType } from '../types';
 import { formatLocalDate } from '../lib/appState';
@@ -24,12 +24,16 @@ import {
 import { getKnowledgePreviewText } from '../lib/knowledgePreview';
 import { DEFAULT_MARKDOWN_EDITOR_MODE, getMarkdownEditorModeValue, type MarkdownEditorMode } from '../lib/markdownEditorModes';
 import type { AuthUser } from '../lib/authApi';
+import type { KnowledgeApiBulkResult } from '../lib/knowledgeApi';
 
 interface KnowledgeCloudProps {
   assets: KnowledgeAsset[];
-  onAddAsset: (newAsset: Omit<KnowledgeAsset, 'id' | 'lastUpdated'>) => void;
-  onUpdateAsset: (asset: KnowledgeAsset) => void;
-  onImportAssets?: (newAssets: Array<Omit<KnowledgeAsset, 'id' | 'lastUpdated'>>) => void;
+  onAddAsset: (newAsset: Omit<KnowledgeAsset, 'id' | 'lastUpdated'>) => Promise<KnowledgeAsset>;
+  onUpdateAsset: (asset: KnowledgeAsset) => Promise<KnowledgeAsset>;
+  onImportAssets?: (newAssets: Array<Omit<KnowledgeAsset, 'id' | 'lastUpdated'>>) => Promise<KnowledgeApiBulkResult>;
+  onBulkUpdateAssets: (assets: KnowledgeAsset[]) => Promise<KnowledgeApiBulkResult>;
+  onDeleteAsset: (asset: KnowledgeAsset) => Promise<void>;
+  onExportAssets: () => Promise<KnowledgeAsset[]>;
   currentUser: AuthUser;
   isOffline: boolean;
   onRefreshAssets: () => Promise<void>;
@@ -604,6 +608,9 @@ export default function KnowledgeCloud({
   onAddAsset,
   onUpdateAsset,
   onImportAssets,
+  onBulkUpdateAssets,
+  onDeleteAsset,
+  onExportAssets,
   currentUser,
   isOffline,
   onRefreshAssets,
@@ -704,7 +711,7 @@ export default function KnowledgeCloud({
   };
 
   // Handle Form Submission
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canEdit) {
       showToast(isOffline ? '离线缓存模式下暂不能保存知识卡片' : '当前账号没有编辑权限');
@@ -744,12 +751,24 @@ export default function KnowledgeCloud({
         id: editingAsset.id,
         lastUpdated: formatLocalDate(),
       } as KnowledgeAsset;
-      onUpdateAsset(updatedAsset);
-      setSelectedAsset(updatedAsset);
-      setToastMsg('知识卡片已更新');
-      setTimeout(() => setToastMsg(null), 2400);
+      try {
+        const savedAsset = await onUpdateAsset(updatedAsset);
+        setSelectedAsset(savedAsset);
+        showToast('知识卡片已同步更新');
+      } catch (error) {
+        console.error('Failed to update knowledge asset', error);
+        showToast(error instanceof Error ? error.message : '知识卡片更新失败', 3600);
+        return;
+      }
     } else {
-      onAddAsset(draft);
+      try {
+        await onAddAsset(draft);
+        showToast('知识卡片已同步创建');
+      } catch (error) {
+        console.error('Failed to create knowledge asset', error);
+        showToast(error instanceof Error ? error.message : '知识卡片创建失败', 3600);
+        return;
+      }
     }
 
     closeAssetForm();
@@ -873,8 +892,8 @@ export default function KnowledgeCloud({
         showToast('未识别到可导入的知识云字段，请检查模板工作表和表头', 3600);
         return;
       }
-      onImportAssets(importedAssets);
-      showToast(`已按模板导入 ${importedAssets.length} 张知识卡片`, 3200);
+      const result = await onImportAssets(importedAssets);
+      showToast(`导入完成：新增 ${result.created}，更新 ${result.updated}，跳过 ${result.skipped}，失败 ${result.failed}`, 3600);
     } catch (error) {
       console.error('Failed to import knowledge workbook', error);
       showToast('导入失败：请确认文件为知识云字段模板 Excel', 3600);
@@ -882,8 +901,9 @@ export default function KnowledgeCloud({
   };
 
   const handleExportWorkbook = async () => {
-    const exportAssets = filteredAssets.length > 0 ? filteredAssets : assets;
     try {
+      const remoteAssets = await onExportAssets();
+      const exportAssets = remoteAssets.length > 0 ? remoteAssets : filteredAssets.length > 0 ? filteredAssets : assets;
       await exportKnowledgeAssetsWorkbook(exportAssets);
       showToast(`已导出 ${exportAssets.length} 张知识卡片`);
     } catch (error) {
@@ -943,7 +963,7 @@ export default function KnowledgeCloud({
     resetBulkEditForm();
   };
 
-  const applyBulkEdit = (event: React.FormEvent) => {
+  const applyBulkEdit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!canAdmin) {
       showToast(isOffline ? '离线缓存模式下暂不能批量编辑' : '当前账号没有批量编辑权限');
@@ -971,7 +991,7 @@ export default function KnowledgeCloud({
       return;
     }
 
-    selectedAssets.forEach(asset => {
+    const nextAssets = selectedAssets.map(asset => {
       const nextAsset: Record<string, any> = { ...asset };
 
       if (bulkCategory) {
@@ -1002,12 +1022,37 @@ export default function KnowledgeCloud({
       }
 
       nextAsset.lastUpdated = formatLocalDate();
-      onUpdateAsset(nextAsset as KnowledgeAsset);
+      return nextAsset as KnowledgeAsset;
     });
 
-    showToast(`已批量更新 ${selectedAssets.length} 张知识卡片`);
-    setSelectedAssetIds([]);
-    closeBulkEditDrawer();
+    try {
+      const result = await onBulkUpdateAssets(nextAssets);
+      showToast(`批量同步完成：新增 ${result.created}，更新 ${result.updated}，跳过 ${result.skipped}，失败 ${result.failed}`, 3600);
+      setSelectedAssetIds([]);
+      closeBulkEditDrawer();
+    } catch (error) {
+      console.error('Failed to bulk update knowledge assets', error);
+      showToast(error instanceof Error ? error.message : '批量编辑同步失败', 3600);
+    }
+  };
+
+  const handleDeleteSelectedAsset = async () => {
+    if (!selectedAsset) return;
+    if (!canAdmin) {
+      showToast(isOffline ? '离线缓存模式下暂不能删除知识卡片' : '当前账号没有删除权限');
+      return;
+    }
+    if (!window.confirm(`确认删除知识卡片「${selectedAsset.title}」？`)) return;
+
+    try {
+      await onDeleteAsset(selectedAsset);
+      showToast('知识卡片已删除');
+      setSelectedAsset(null);
+      setSelectedAssetIds(prev => prev.filter(id => id !== selectedAsset.id));
+    } catch (error) {
+      console.error('Failed to delete knowledge asset', error);
+      showToast(error instanceof Error ? error.message : '知识卡片删除失败', 3600);
+    }
   };
 
   const renderDetailFields = (asset: KnowledgeAsset) => {
@@ -1928,6 +1973,18 @@ export default function KnowledgeCloud({
                   {CATEGORY_MAP[selectedAsset.category].label}
                 </span>
                 <div className="flex items-center gap-2">
+                  {canAdmin && (
+                    <button
+                      type="button"
+                      onClick={handleDeleteSelectedAsset}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition cursor-pointer text-[11px] font-black shadow-sm"
+                      title="删除该知识卡片"
+                      id="delete-selected-knowledge-btn"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      删除
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => openEditAssetDrawer(selectedAsset)}

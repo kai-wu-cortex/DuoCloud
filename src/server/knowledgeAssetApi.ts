@@ -524,6 +524,16 @@ export async function handleKnowledgeAssetDocumentRequest(
 
   if (req.method === 'DELETE') {
     const actor = requireRole(req, secret, ['admin']);
+    const rawBody = asRecord(parseBody(req.body)) ?? {};
+    const expectedServerVersion = getRequestServerVersion(rawBody);
+    if (expectedServerVersion === null) {
+      throw new KnowledgeAssetApiError(
+        422,
+        'VALIDATION_ERROR',
+        'VALIDATION_ERROR: serverVersion is required.',
+      );
+    }
+
     const existing = await findActiveAssetById(id);
     if (!existing) {
       throw new KnowledgeAssetApiError(404, 'NOT_FOUND', 'NOT_FOUND: 未找到知识卡片。');
@@ -537,12 +547,12 @@ export async function handleKnowledgeAssetDocumentRequest(
       serverUpdatedAt: now,
       serverUpdatedBy: toActor(actor),
       lastUpdated: formatDateOnly(now),
-      serverVersion: existing.serverVersion + 1,
+      serverVersion: expectedServerVersion + 1,
     };
 
     const collection = await getKnowledgeAssetsCollection();
     const replaceResult = await collection.replaceOne(
-      { _id: id, serverVersion: existing.serverVersion, serverStatus: { $ne: 'archived' } },
+      { _id: id, serverVersion: expectedServerVersion, serverStatus: { $ne: 'archived' } },
       archived,
     );
     if (replaceResult.matchedCount === 0) {
@@ -663,9 +673,6 @@ export async function handleKnowledgeAssetExportRequest(
 
   sendKnowledgeJson(res, 200, {
     success: true,
-    data: {
-      exportedAt: new Date().toISOString(),
-      items,
-    },
+    data: items,
   });
 }

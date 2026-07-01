@@ -22,9 +22,7 @@ import { initialProducts, initialPracticeCards, initialKnowledgeAssets } from '.
 import { obsidianKnowledgeAssets } from './data/obsidianKnowledgeAssets';
 import { KnowledgeAsset, PracticeCard } from './types';
 import {
-  createKnowledgeAsset,
   createPracticeCard,
-  formatLocalDate,
   loadKnowledgeAssets,
   loadPracticeCards,
   saveKnowledgeAssets,
@@ -33,7 +31,16 @@ import {
 import { curateKnowledgeAsset, curateKnowledgeAssets } from './lib/knowledgeCuration';
 import DuoCloudLogin from './components/DuoCloudLogin';
 import { AuthUser, getDuoCloudSession, signInToDuoCloud, signOutOfDuoCloud } from './lib/authApi';
-import { KnowledgeApiError, listKnowledgeAssets } from './lib/knowledgeApi';
+import {
+  KnowledgeApiError,
+  bulkImportKnowledgeAssets,
+  bulkPatchKnowledgeAssets,
+  createRemoteKnowledgeAsset,
+  deleteRemoteKnowledgeAsset,
+  exportRemoteKnowledgeAssets,
+  listKnowledgeAssets,
+  updateRemoteKnowledgeAsset,
+} from './lib/knowledgeApi';
 
 const CombatToolkit = lazy(() => import('./components/CombatToolkit'));
 const KnowledgeCloud = lazy(() => import('./components/KnowledgeCloud'));
@@ -88,45 +95,111 @@ export default function App() {
     }
   }, []);
 
+  const handleKnowledgeApiError = useCallback((error: unknown, fallback: string) => {
+    const message = error instanceof Error ? error.message : fallback;
+    if (error instanceof KnowledgeApiError && error.code === 'UNAUTHORIZED') {
+      setAuthUser(null);
+      setAuthStatus('unauthenticated');
+      setAuthError(message);
+      setKnowledgeAssets([]);
+      setKnowledgeCloudStatus('idle');
+      return;
+    }
+    setAuthError(message);
+    throw error;
+  }, []);
+
   // Add new knowledge asset to state
-  const handleAddKnowledgeAsset = (newAsset: Omit<KnowledgeAsset, 'id' | 'lastUpdated'>) => {
-    const asset = curateKnowledgeAsset(createKnowledgeAsset(newAsset));
-    setKnowledgeAssets(prevAssets => {
-      const nextAssets = [asset, ...prevAssets];
-      saveKnowledgeAssets(nextAssets);
-      return nextAssets;
-    });
+  const handleAddKnowledgeAsset = async (newAsset: Omit<KnowledgeAsset, 'id' | 'lastUpdated'>) => {
+    try {
+      const asset = curateKnowledgeAsset(await createRemoteKnowledgeAsset(newAsset));
+      setKnowledgeAssets(prevAssets => {
+        const nextAssets = [asset, ...prevAssets];
+        saveKnowledgeAssets(nextAssets);
+        return nextAssets;
+      });
+      setKnowledgeCloudStatus('online');
+      setAuthError(null);
+      return asset;
+    } catch (error) {
+      handleKnowledgeApiError(error, '新增知识卡片失败。');
+      throw error;
+    }
   };
 
-  const handleUpdateKnowledgeAsset = (updatedAsset: KnowledgeAsset) => {
-    const today = formatLocalDate();
-    const assetWithUpdatedDate = curateKnowledgeAsset({
-      ...updatedAsset,
-      lastUpdated: today,
-      localEditedAt: today,
-    } as KnowledgeAsset);
-
-    setKnowledgeAssets(prevAssets => {
-      const nextAssets = prevAssets.map(asset => (
-        asset.id === assetWithUpdatedDate.id ? assetWithUpdatedDate : asset
-      ));
-      saveKnowledgeAssets(nextAssets);
-      return nextAssets;
-    });
+  const handleUpdateKnowledgeAsset = async (updatedAsset: KnowledgeAsset) => {
+    try {
+      const savedAsset = curateKnowledgeAsset(await updateRemoteKnowledgeAsset(updatedAsset));
+      setKnowledgeAssets(prevAssets => {
+        const nextAssets = prevAssets.map(asset => (
+          asset.id === savedAsset.id ? savedAsset : asset
+        ));
+        saveKnowledgeAssets(nextAssets);
+        return nextAssets;
+      });
+      setKnowledgeCloudStatus('online');
+      setAuthError(null);
+      return savedAsset;
+    } catch (error) {
+      handleKnowledgeApiError(error, '更新知识卡片失败。');
+      throw error;
+    }
   };
 
-  const handleImportKnowledgeAssets = (newAssets: Array<Omit<KnowledgeAsset, 'id' | 'lastUpdated'>>) => {
-    if (newAssets.length === 0) return;
+  const handleImportKnowledgeAssets = async (newAssets: Array<Omit<KnowledgeAsset, 'id' | 'lastUpdated'>>) => {
+    if (newAssets.length === 0) return { created: 0, updated: 0, skipped: 0, failed: 0, errors: [] };
 
-    const importSeed = Date.now().toString().slice(-6);
-    setKnowledgeAssets(prevAssets => {
-      const importedAssets = newAssets.map((asset, index) => curateKnowledgeAsset(createKnowledgeAsset(asset, {
-        idSeed: `IMP-${importSeed}-${index.toString(36).toUpperCase()}`,
-      })));
-      const nextAssets = [...importedAssets, ...prevAssets];
-      saveKnowledgeAssets(nextAssets);
-      return nextAssets;
-    });
+    try {
+      const result = await bulkImportKnowledgeAssets(newAssets);
+      await refreshKnowledgeAssets();
+      setAuthError(null);
+      return result;
+    } catch (error) {
+      handleKnowledgeApiError(error, '导入知识卡片失败。');
+      throw error;
+    }
+  };
+
+  const handleBulkUpdateKnowledgeAssets = async (updatedAssets: KnowledgeAsset[]) => {
+    try {
+      const curatedAssets = curateKnowledgeAssets(updatedAssets);
+      const result = await bulkPatchKnowledgeAssets({ assets: curatedAssets });
+      await refreshKnowledgeAssets();
+      setAuthError(null);
+      return result;
+    } catch (error) {
+      handleKnowledgeApiError(error, '批量更新知识卡片失败。');
+      throw error;
+    }
+  };
+
+  const handleDeleteKnowledgeAsset = async (asset: KnowledgeAsset) => {
+    try {
+      const version = typeof (asset as KnowledgeAsset & { serverVersion?: unknown }).serverVersion === 'number'
+        ? (asset as KnowledgeAsset & { serverVersion: number }).serverVersion
+        : 0;
+      await deleteRemoteKnowledgeAsset(asset.id, version);
+      setKnowledgeAssets(prevAssets => {
+        const nextAssets = prevAssets.filter(item => item.id !== asset.id);
+        saveKnowledgeAssets(nextAssets);
+        return nextAssets;
+      });
+      setAuthError(null);
+    } catch (error) {
+      handleKnowledgeApiError(error, '删除知识卡片失败。');
+      throw error;
+    }
+  };
+
+  const handleExportKnowledgeAssets = async () => {
+    try {
+      const assets = curateKnowledgeAssets(await exportRemoteKnowledgeAssets());
+      setAuthError(null);
+      return assets;
+    } catch (error) {
+      handleKnowledgeApiError(error, '导出知识卡片失败。');
+      throw error;
+    }
   };
 
   // Add new practice card to state
@@ -409,6 +482,9 @@ export default function App() {
                 onAddAsset={handleAddKnowledgeAsset}
                 onUpdateAsset={handleUpdateKnowledgeAsset}
                 onImportAssets={handleImportKnowledgeAssets}
+                onBulkUpdateAssets={handleBulkUpdateKnowledgeAssets}
+                onDeleteAsset={handleDeleteKnowledgeAsset}
+                onExportAssets={handleExportKnowledgeAssets}
                 currentUser={authUser}
                 isOffline={knowledgeCloudStatus === 'offline'}
                 onRefreshAssets={refreshKnowledgeAssets}

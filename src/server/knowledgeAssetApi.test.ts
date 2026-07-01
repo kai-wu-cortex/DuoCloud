@@ -449,6 +449,9 @@ test('CRUD handlers preserve domain fields, enforce serverVersion, and write rev
     method: 'DELETE',
     headers: createAuthHeaders(adminUser),
     query: { id: governanceAsset.id },
+    body: {
+      serverVersion: updated.serverVersion,
+    },
   });
   const deleteRes = createMockResponse();
   await handleKnowledgeAssetDocumentRequest(deleteReq, deleteRes.res);
@@ -456,6 +459,11 @@ test('CRUD handlers preserve domain fields, enforce serverVersion, and write rev
   const deleted = getSuccessData<KnowledgeAssetDocument>(deleteRes.state.body);
   assert.equal(deleted.serverStatus, 'archived');
   assert.ok(deleted.serverDeletedAt instanceof Date);
+  assert.deepEqual(assets.replaceFilters.at(-1), {
+    _id: 'GOV-001',
+    serverVersion: 2,
+    serverStatus: { $ne: 'archived' },
+  });
 
   assert.equal(revisions.documents.length, 3);
   assert.deepEqual(revisions.documents.map(entry => entry.operation), ['create', 'update', 'delete']);
@@ -493,11 +501,9 @@ test('soft-deleted assets are filtered from list and export responses', async ()
   });
   const exportRes = createMockResponse();
   await handleKnowledgeAssetExportRequest(exportReq, exportRes.res);
-  const exportData = getSuccessData<{ exportedAt: string; items: KnowledgeAssetDocument[] }>(
-    exportRes.state.body,
-  );
-  assert.equal(exportData.items.length, 1);
-  assert.equal(exportData.items[0]._id, 'GOV-001');
+  const exportItems = getSuccessData<KnowledgeAssetDocument[]>(exportRes.state.body);
+  assert.equal(exportItems.length, 1);
+  assert.equal(exportItems[0]._id, 'GOV-001');
 });
 
 test('bulk import logs import jobs, skips unchanged assets, and writes revisions', async () => {

@@ -1,14 +1,17 @@
 import type { KnowledgeAsset } from '../types';
+import { createKnowledgeAsset } from './appState';
 
 export interface KnowledgeApiBulkResult {
   jobId?: unknown;
-  counts: {
-    created: number;
-    updated: number;
-    skipped: number;
-    failed: number;
-  };
+  created: number;
+  updated: number;
+  skipped: number;
+  failed: number;
   errors: Array<{ id: string; message: string }>;
+}
+
+export interface KnowledgeBulkPatchPayload {
+  assets: KnowledgeAsset[];
 }
 
 interface KnowledgeApiResponse<T> {
@@ -139,13 +142,26 @@ export function parseKnowledgeApiAssetResponse(payload: unknown): KnowledgeAsset
   return response.data;
 }
 
-export function parseKnowledgeApiBulkResponse(payload: unknown): KnowledgeApiBulkResult {
+export function parseBulkResult(payload: unknown): KnowledgeApiBulkResult {
   const response = payload as KnowledgeApiResponse<unknown>;
-  const data = response?.data as Partial<KnowledgeApiBulkResult> | undefined;
+  const data = response?.data as Partial<KnowledgeApiBulkResult> & {
+    counts?: Partial<Pick<KnowledgeApiBulkResult, 'created' | 'updated' | 'skipped' | 'failed'>>;
+  } | undefined;
   if (!response?.success) {
     throw new KnowledgeApiError(getApiMessage(payload, '知识云批量请求失败。'), {
       code: getApiCode(payload, 'KNOWLEDGE_API_ERROR'),
     });
+  }
+
+  if (
+    data
+    && typeof data.created === 'number'
+    && typeof data.updated === 'number'
+    && typeof data.skipped === 'number'
+    && typeof data.failed === 'number'
+    && Array.isArray(data.errors)
+  ) {
+    return { created: data.created, updated: data.updated, skipped: data.skipped, failed: data.failed, errors: data.errors };
   }
 
   if (
@@ -163,18 +179,28 @@ export function parseKnowledgeApiBulkResponse(payload: unknown): KnowledgeApiBul
     });
   }
 
-  return data as KnowledgeApiBulkResult;
+  return {
+    ...(data.jobId === undefined ? {} : { jobId: data.jobId }),
+    created: data.counts.created,
+    updated: data.counts.updated,
+    skipped: data.counts.skipped,
+    failed: data.counts.failed,
+    errors: data.errors,
+  };
 }
+
+export const parseKnowledgeApiBulkResponse = parseBulkResult;
 
 export async function listKnowledgeAssets(): Promise<KnowledgeAsset[]> {
   const payload = await requestKnowledgeApi<unknown>('/api/knowledge-assets');
   return parseKnowledgeApiListResponse(payload);
 }
 
-export async function createRemoteKnowledgeAsset(asset: KnowledgeAsset): Promise<KnowledgeAsset> {
+export async function createRemoteKnowledgeAsset(asset: Omit<KnowledgeAsset, 'id' | 'lastUpdated'>): Promise<KnowledgeAsset> {
+  const fullAsset = createKnowledgeAsset(asset);
   const payload = await requestKnowledgeApi<unknown>('/api/knowledge-assets', {
     method: 'POST',
-    body: JSON.stringify(asset),
+    body: JSON.stringify(fullAsset),
   });
   return parseKnowledgeApiAssetResponse(payload);
 }
@@ -187,7 +213,14 @@ export async function updateRemoteKnowledgeAsset(asset: KnowledgeAsset): Promise
   return parseKnowledgeApiAssetResponse(payload);
 }
 
-export async function bulkUpdateKnowledgeAssets(payload: {
+export async function deleteRemoteKnowledgeAsset(id: string, version: number): Promise<void> {
+  await requestKnowledgeApi<unknown>(`/api/knowledge-assets/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ serverVersion: version }),
+  });
+}
+
+async function postKnowledgeBulk(payload: {
   assets: KnowledgeAsset[];
   source?: 'duocloud' | 'obsidian_import' | 'external_update_app';
   input?: string;
@@ -196,5 +229,36 @@ export async function bulkUpdateKnowledgeAssets(payload: {
     method: 'POST',
     body: JSON.stringify(payload),
   });
-  return parseKnowledgeApiBulkResponse(response);
+  return parseBulkResult(response);
+}
+
+export async function bulkUpdateKnowledgeAssets(payload: {
+  assets: KnowledgeAsset[];
+  source?: 'duocloud' | 'obsidian_import' | 'external_update_app';
+  input?: string;
+}): Promise<KnowledgeApiBulkResult> {
+  return postKnowledgeBulk(payload);
+}
+
+export async function bulkImportKnowledgeAssets(
+  assets: Array<Omit<KnowledgeAsset, 'id' | 'lastUpdated'>>,
+): Promise<KnowledgeApiBulkResult> {
+  return postKnowledgeBulk({
+    assets: assets.map(asset => createKnowledgeAsset(asset)),
+    source: 'duocloud',
+    input: 'duocloud-import',
+  });
+}
+
+export async function bulkPatchKnowledgeAssets(payload: KnowledgeBulkPatchPayload): Promise<KnowledgeApiBulkResult> {
+  return postKnowledgeBulk({
+    assets: payload.assets,
+    source: 'duocloud',
+    input: 'duocloud-bulk-patch',
+  });
+}
+
+export async function exportRemoteKnowledgeAssets(): Promise<KnowledgeAsset[]> {
+  const payload = await requestKnowledgeApi<unknown>('/api/knowledge-assets/export');
+  return parseKnowledgeApiListResponse(payload);
 }
