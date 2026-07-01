@@ -328,11 +328,10 @@ test('validateKnowledgeAssetPayload rejects invalid category', () => {
   assert.match(result.message, /category/);
 });
 
-test('validateKnowledgeAssetPayload rejects missing required category fields', () => {
-  const invalid = { ...productMasterAsset, productName: '' };
-  const result = validateKnowledgeAssetPayload(invalid);
-  assert.equal(result.valid, false);
-  assert.match(result.message, /productName/);
+test('validateKnowledgeAssetPayload allows empty structured category fields', () => {
+  const valid = { ...productMasterAsset, productName: '' };
+  const result = validateKnowledgeAssetPayload(valid);
+  assert.equal(result.valid, true);
 });
 
 test('applyKnowledgeAssetUpdate preserves domain fields and writes server metadata', () => {
@@ -537,11 +536,10 @@ test('bulk import logs import jobs, skips unchanged assets, and writes revisions
     counts: { created: number; updated: number; skipped: number; failed: number };
     errors: Array<{ id: string; message: string }>;
   }>(state.body);
-  assert.deepEqual(data.counts, { created: 1, updated: 1, skipped: 1, failed: 1 });
-  assert.equal(data.errors.length, 1);
-  assert.match(data.errors[0].message, /productName/);
-  assert.equal(revisions.documents.length, 2);
-  assert.deepEqual(revisions.documents.map(entry => entry.operation), ['bulk-import', 'bulk-import']);
+  assert.deepEqual(data.counts, { created: 2, updated: 1, skipped: 1, failed: 0 });
+  assert.equal(data.errors.length, 0);
+  assert.equal(revisions.documents.length, 3);
+  assert.deepEqual(revisions.documents.map(entry => entry.operation), ['bulk-import', 'bulk-import', 'bulk-import']);
   assert.equal(importJobs.documents.length, 1);
   assert.equal(importJobs.documents[0].status, 'completed');
   assert.deepEqual(importJobs.documents[0].counts, data.counts);

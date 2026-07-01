@@ -10,6 +10,7 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "create:knowledge-user": "tsx scripts/createKnowledgeUser.ts",
+    "import:seed-knowledge": "tsx scripts/importSeedKnowledgeToMongo.ts",
     "sync:obsidian-knowledge": "tsx scripts/syncObsidianKnowledge.ts",
     "test": "tsx --test src/**/*.test.ts"
   },

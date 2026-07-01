@@ -1,6 +1,5 @@
 import type { Request, Response } from 'express';
 import type { Collection, Document, Filter, OptionalId, ReplaceOptions } from 'mongodb';
-import { KNOWLEDGE_FIELD_SCHEMAS } from '../lib/knowledgeFieldSchemas.ts';
 import { getMongoCollection } from '../lib/mongodb.ts';
 import type { KnowledgeAsset, KnowledgeTableType } from '../types.ts';
 import {
@@ -165,10 +164,6 @@ function formatDateOnly(now: Date): string {
 
 function isKnowledgeCategory(value: unknown): value is KnowledgeTableType {
   return typeof value === 'string' && KNOWLEDGE_CATEGORIES.includes(value as KnowledgeTableType);
-}
-
-function getRequiredCategoryFields(category: KnowledgeTableType) {
-  return KNOWLEDGE_FIELD_SCHEMAS[category].fields.filter(field => field.required);
 }
 
 function ensureNormalizedKnowledgeAsset(value: unknown): KnowledgeAsset {
@@ -361,14 +356,8 @@ export function validateKnowledgeAssetPayload(
     return { valid: false, message: 'VALIDATION_ERROR: content must be a string.' };
   }
 
-  for (const field of getRequiredCategoryFields(record.category)) {
-    if (typeof record[field.name] !== 'string' || !(record[field.name] as string).trim()) {
-      return {
-        valid: false,
-        message: `VALIDATION_ERROR: ${field.name} (${field.label}) is required.`,
-      };
-    }
-  }
+  // Structured category fields are optional so historical Obsidian imports,
+  // partial drafts, and human-entered cards can be saved incrementally.
 
   return { valid: true };
 }

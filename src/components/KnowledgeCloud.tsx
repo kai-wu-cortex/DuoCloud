@@ -36,6 +36,7 @@ interface KnowledgeCloudProps {
   onExportAssets: () => Promise<KnowledgeAsset[]>;
   currentUser: AuthUser;
   isOffline: boolean;
+  isSyncing?: boolean;
   onRefreshAssets: () => Promise<void>;
   isAppSidebarCollapsed?: boolean;
 }
@@ -613,6 +614,7 @@ export default function KnowledgeCloud({
   onExportAssets,
   currentUser,
   isOffline,
+  isSyncing = false,
   onRefreshAssets,
   isAppSidebarCollapsed = false,
 }: KnowledgeCloudProps) {
@@ -1559,11 +1561,16 @@ export default function KnowledgeCloud({
                     onClick={() => {
                       void onRefreshAssets();
                     }}
-                    className="flex items-center justify-center gap-1.5 px-2.5 py-2 bg-white border border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] font-extrabold text-xs rounded-xl transition shadow-sm cursor-pointer shrink-0"
-                    title="重新同步知识云"
+                    disabled={isSyncing}
+                    className={`flex items-center justify-center gap-1.5 px-2.5 py-2 bg-white border border-[#E2E4E9] font-extrabold text-xs rounded-xl transition shadow-sm shrink-0 ${
+                      isSyncing
+                        ? 'text-[#5F52EE] border-[#5F52EE]/40 cursor-wait'
+                        : 'text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] cursor-pointer'
+                    }`}
+                    title={isSyncing ? '正在同步知识云' : '重新同步知识云'}
                   >
-                    <RotateCcw className="w-4 h-4" />
-                    <span>同步</span>
+                    <RotateCcw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                    <span>{isSyncing ? '同步中' : '同步'}</span>
                   </button>
                 </div>
             </div>

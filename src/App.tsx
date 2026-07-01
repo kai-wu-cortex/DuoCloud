@@ -73,7 +73,6 @@ export default function App() {
 
   const refreshKnowledgeAssets = useCallback(async () => {
     setKnowledgeCloudStatus('loading');
-    setKnowledgeAssets(loadLocalKnowledgeFallback());
 
     try {
       const remoteAssets = curateKnowledgeAssets(await listKnowledgeAssets());
@@ -90,7 +89,9 @@ export default function App() {
         return;
       }
 
-      setKnowledgeAssets(loadLocalKnowledgeFallback());
+      setKnowledgeAssets(currentAssets => (
+        currentAssets.length > 0 ? currentAssets : loadLocalKnowledgeFallback()
+      ));
       setKnowledgeCloudStatus('offline');
     }
   }, []);
@@ -487,6 +488,7 @@ export default function App() {
                 onExportAssets={handleExportKnowledgeAssets}
                 currentUser={authUser}
                 isOffline={knowledgeCloudStatus === 'offline'}
+                isSyncing={knowledgeCloudStatus === 'loading'}
                 onRefreshAssets={refreshKnowledgeAssets}
                 isAppSidebarCollapsed={isSidebarCollapsed}
               />
