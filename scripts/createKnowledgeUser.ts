@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { Document } from 'mongodb';
 import 'dotenv/config';
-import { getMongoCollection } from '../src/lib/mongodb';
+import { closeMongoClient, getMongoCollection } from '../src/lib/mongodb';
 import { hashPassword, normalizeUsername } from '../src/server/loginApi';
 import type { UserRole } from '../src/server/sessionAuth';
 
@@ -38,22 +38,26 @@ if (!username) {
 const salt = randomBytes(16).toString('hex');
 const passwordHash = hashPassword(password, salt);
 const now = new Date();
-const collection = await getMongoCollection<SystemUserSetupDoc>('system_users');
+try {
+  const collection = await getMongoCollection<SystemUserSetupDoc>('system_users');
 
-await collection.updateOne(
-  { _id: username },
-  {
-    $set: {
-      _id: username,
-      username,
-      role,
-      salt,
-      passwordHash,
-      updatedAt: now,
+  await collection.updateOne(
+    { _id: username },
+    {
+      $set: {
+        _id: username,
+        username,
+        role,
+        salt,
+        passwordHash,
+        updatedAt: now,
+      },
+      $setOnInsert: { createdAt: now },
     },
-    $setOnInsert: { createdAt: now },
-  },
-  { upsert: true },
-);
+    { upsert: true },
+  );
 
-console.log(`User ${username} saved with role ${role}`);
+  console.log(`User ${username} saved with role ${role}`);
+} finally {
+  await closeMongoClient();
+}

@@ -57,3 +57,10 @@ export async function getMongoCollection<T extends Document>(
   const db = await getMongoDb();
   return db.collection<T>(name);
 }
+
+export async function closeMongoClient(): Promise<void> {
+  const activeClient = client || (clientPromise ? await clientPromise : null);
+  client = null;
+  clientPromise = null;
+  if (activeClient) await activeClient.close();
+}

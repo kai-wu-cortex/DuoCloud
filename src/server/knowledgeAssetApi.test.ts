@@ -131,7 +131,7 @@ function createRequest(
 
 function createAuthHeaders(user: SessionUser): Record<string, string> {
   const secret = process.env.SESSION_SECRET ?? 'session-secret';
-  const token = createSessionToken(user, secret, new Date('2026-07-01T00:00:00.000Z'));
+  const token = createSessionToken(user, secret, new Date('2099-01-01T00:00:00.000Z'));
   return { cookie: `duocloud_session=${token}` };
 }
 
