@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { Suspense, lazy, useCallback, useEffect, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { 
   BookOpen, 
   Database, 
@@ -69,7 +69,12 @@ export default function App() {
   
   // App-level state for persistent live sandbox interaction
   const [knowledgeAssets, setKnowledgeAssets] = useState<KnowledgeAsset[]>(loadLocalKnowledgeFallback);
+  const knowledgeAssetsRef = useRef<KnowledgeAsset[]>(knowledgeAssets);
   const [practiceCards, setPracticeCards] = useState<PracticeCard[]>(() => loadPracticeCards(initialPracticeCards));
+
+  useEffect(() => {
+    knowledgeAssetsRef.current = knowledgeAssets;
+  }, [knowledgeAssets]);
 
   const refreshKnowledgeAssets = useCallback(async () => {
     setKnowledgeCloudStatus('loading');
@@ -79,6 +84,7 @@ export default function App() {
       setKnowledgeAssets(remoteAssets);
       saveKnowledgeAssets(remoteAssets);
       setKnowledgeCloudStatus('online');
+      return remoteAssets;
     } catch (error) {
       if (error instanceof KnowledgeApiError && error.code === 'UNAUTHORIZED') {
         setAuthUser(null);
@@ -86,13 +92,15 @@ export default function App() {
         setAuthError(error.message);
         setKnowledgeAssets([]);
         setKnowledgeCloudStatus('idle');
-        return;
+        return [];
       }
 
-      setKnowledgeAssets(currentAssets => (
-        currentAssets.length > 0 ? currentAssets : loadLocalKnowledgeFallback()
-      ));
+      const currentAssets = knowledgeAssetsRef.current;
+      const fallbackAssets = currentAssets.length > 0 ? currentAssets : loadLocalKnowledgeFallback();
+      setKnowledgeAssets(currentAssets => (currentAssets.length > 0 ? currentAssets : fallbackAssets));
+      if (currentAssets.length === 0) saveKnowledgeAssets(fallbackAssets);
       setKnowledgeCloudStatus('offline');
+      return fallbackAssets;
     }
   }, []);
 

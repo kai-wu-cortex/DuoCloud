@@ -37,7 +37,7 @@ interface KnowledgeCloudProps {
   currentUser: AuthUser;
   isOffline: boolean;
   isSyncing?: boolean;
-  onRefreshAssets: () => Promise<void>;
+  onRefreshAssets: () => Promise<KnowledgeAsset[] | void>;
   isAppSidebarCollapsed?: boolean;
 }
 
@@ -742,6 +742,7 @@ export default function KnowledgeCloud({
   isAppSidebarCollapsed = false,
 }: KnowledgeCloudProps) {
   const [activeCategory, setActiveCategory] = useState<KnowledgeTableType | 'all'>('all');
+  const [activeTagFilter, setActiveTagFilter] = useState('all');
   const [activeDirectoryPath, setActiveDirectoryPath] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedAsset, setSelectedAsset] = useState<KnowledgeAsset | null>(null);
@@ -766,6 +767,7 @@ export default function KnowledgeCloud({
   const [bulkContentMode, setBulkContentMode] = useState<'append' | 'replace'>('append');
   const [bulkContent, setBulkContent] = useState('');
   const [renderLimit, setRenderLimit] = useState(GRID_BATCH_SIZE);
+  const [syncSummary, setSyncSummary] = useState<{ added: number; removed: number; beforeTotal: number; afterTotal: number } | null>(null);
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const canEdit = !isOffline && (currentUser.role === 'editor' || currentUser.role === 'admin');
@@ -926,7 +928,7 @@ export default function KnowledgeCloud({
 
   useEffect(() => {
     setRenderLimit(viewMode === 'grid' ? GRID_BATCH_SIZE : LIST_BATCH_SIZE);
-  }, [activeCategory, activeDirectoryPath, deferredSearchQuery, viewMode, cardsPerRow, cardSpacing]);
+  }, [activeCategory, activeDirectoryPath, activeTagFilter, deferredSearchQuery, viewMode, cardsPerRow, cardSpacing]);
 
   const selectedAssetIdSet = useMemo(() => new Set(selectedAssetIds), [selectedAssetIds]);
 
@@ -947,7 +949,7 @@ export default function KnowledgeCloud({
     return counts;
   }, [assets]);
 
-  const filteredAssets = useMemo(() => {
+  const baseFilteredAssets = useMemo(() => {
     const query = deferredSearchQuery.trim().toLowerCase();
     return assetSearchRecords
       .filter(({ asset, directoryPath, searchText }) => {
@@ -957,6 +959,33 @@ export default function KnowledgeCloud({
       })
       .map(record => record.asset);
   }, [activeCategory, activeDirectoryPath, assetSearchRecords, deferredSearchQuery]);
+
+  const tagFilterOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const asset of baseFilteredAssets) {
+      for (const tag of asset.tags || []) {
+        const normalized = tag.trim();
+        if (!normalized) continue;
+        counts.set(normalized, (counts.get(normalized) || 0) + 1);
+      }
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-Hans-CN'))
+      .slice(0, 14)
+      .map(([tag, count]) => ({ tag, count }));
+  }, [baseFilteredAssets]);
+
+  useEffect(() => {
+    if (activeTagFilter === 'all') return;
+    if (!tagFilterOptions.some(option => option.tag === activeTagFilter)) {
+      setActiveTagFilter('all');
+    }
+  }, [activeTagFilter, tagFilterOptions]);
+
+  const filteredAssets = useMemo(() => {
+    if (activeTagFilter === 'all') return baseFilteredAssets;
+    return baseFilteredAssets.filter(asset => (asset.tags || []).includes(activeTagFilter));
+  }, [activeTagFilter, baseFilteredAssets]);
 
   const visibleAssets = useMemo(() => filteredAssets.slice(0, renderLimit), [filteredAssets, renderLimit]);
   const hasMoreFilteredAssets = visibleAssets.length < filteredAssets.length;
@@ -996,6 +1025,28 @@ export default function KnowledgeCloud({
   const showToast = (message: string, duration = 2400) => {
     setToastMsg(message);
     setTimeout(() => setToastMsg(null), duration);
+  };
+
+  const handleRefreshAssets = async () => {
+    const beforeAssets = assets;
+    const beforeIds = new Set(beforeAssets.map(asset => asset.id));
+    try {
+      const refreshedAssets = await onRefreshAssets();
+      const afterAssets = Array.isArray(refreshedAssets) ? refreshedAssets : beforeAssets;
+      const afterIds = new Set(afterAssets.map(asset => asset.id));
+      const added = afterAssets.filter(asset => !beforeIds.has(asset.id)).length;
+      const removed = beforeAssets.filter(asset => !afterIds.has(asset.id)).length;
+      setSyncSummary({
+        added,
+        removed,
+        beforeTotal: beforeAssets.length,
+        afterTotal: afterAssets.length,
+      });
+      showToast(`同步完成：新增 ${added}，删除 ${removed}，总数 ${afterAssets.length}`, 3200);
+    } catch (error) {
+      console.error('Failed to refresh knowledge assets', error);
+      showToast(error instanceof Error ? error.message : '同步失败：请稍后重试', 3600);
+    }
   };
 
   const handleEditorAttachmentUpload = async (
@@ -1701,7 +1752,7 @@ export default function KnowledgeCloud({
                   <button
                     type="button"
                     onClick={() => {
-                      void onRefreshAssets();
+                      void handleRefreshAssets();
                     }}
                     disabled={isSyncing}
                     className={`flex items-center justify-center gap-1.5 px-2.5 py-2 bg-white border border-[#E2E4E9] font-extrabold text-xs rounded-xl transition shadow-sm shrink-0 ${
@@ -1716,6 +1767,75 @@ export default function KnowledgeCloud({
                   </button>
                 </div>
             </div>
+          </div>
+
+          {syncSummary && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#5F52EE]/15 bg-white/80 px-3 py-2 shadow-sm text-[11px] font-black text-[#0D0B3D]">
+              <span className="inline-flex items-center gap-1.5 text-[#5F52EE]">
+                <RotateCcw className="w-3.5 h-3.5" />
+                同步完成
+              </span>
+              <span className="text-slate-400">新增</span>
+              <span className="rounded-lg bg-emerald-50 px-2 py-0.5 text-emerald-700">{syncSummary.added}</span>
+              <span className="text-slate-400">删除</span>
+              <span className="rounded-lg bg-red-50 px-2 py-0.5 text-red-700">{syncSummary.removed}</span>
+              <span className="text-slate-400">总数</span>
+              <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-slate-700">{syncSummary.afterTotal}</span>
+              <span className="text-slate-400">原 {syncSummary.beforeTotal}</span>
+              <button
+                type="button"
+                onClick={() => setSyncSummary(null)}
+                className="ml-auto text-slate-400 hover:text-slate-600 cursor-pointer"
+                title="关闭同步提示"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#E2E4E9] bg-white/70 px-3 py-2 shadow-sm">
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-black text-slate-500 shrink-0">
+              <Tag className="w-3.5 h-3.5 text-[#5F52EE]" />
+              标签分组
+            </span>
+            <button
+              type="button"
+              onClick={() => setActiveTagFilter('all')}
+              className={`h-7 px-2.5 rounded-lg text-[11px] font-black transition cursor-pointer ${
+                activeTagFilter === 'all'
+                  ? 'bg-[#0D0B3D] text-white shadow-sm'
+                  : 'bg-white text-slate-500 hover:text-[#5F52EE] hover:bg-slate-50 border border-[#E2E4E9]'
+              }`}
+            >
+              全部标签
+            </button>
+            {tagFilterOptions.map(option => (
+              <button
+                key={option.tag}
+                type="button"
+                onClick={() => setActiveTagFilter(option.tag)}
+                className={`h-7 max-w-[11rem] inline-flex items-center gap-1.5 px-2.5 rounded-lg text-[11px] font-black transition cursor-pointer ${
+                  activeTagFilter === option.tag
+                    ? 'bg-[#5F52EE] text-white shadow-sm'
+                    : 'bg-white text-[#0D0B3D] hover:text-[#5F52EE] hover:bg-slate-50 border border-[#E2E4E9]'
+                }`}
+                title={option.tag}
+              >
+                <span className="truncate">{option.tag}</span>
+                <span className={`font-mono rounded-md px-1.5 py-0.5 ${activeTagFilter === option.tag ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                  {option.count}
+                </span>
+              </button>
+            ))}
+            {activeTagFilter !== 'all' && (
+              <button
+                type="button"
+                onClick={() => setActiveTagFilter('all')}
+                className="ml-auto text-[11px] font-black text-[#5F52EE] hover:underline cursor-pointer"
+              >
+                清除标签筛选
+              </button>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
