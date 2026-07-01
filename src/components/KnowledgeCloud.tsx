@@ -1404,8 +1404,8 @@ export default function KnowledgeCloud({
               )}
             </h1>
 
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full">
-              <div className="relative bg-white border border-[#E2E4E9] rounded-xl px-3 py-2 flex items-center gap-2 shadow-sm focus-within:border-slate-300 transition min-w-0 w-full sm:w-[18rem] xl:w-[19rem] 2xl:w-[21rem] shrink-0">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:overflow-x-auto sm:pb-1 sm:[scrollbar-width:none] sm:[&::-webkit-scrollbar]:hidden">
+              <div className="relative bg-white border border-[#E2E4E9] rounded-xl px-3 py-2 flex items-center gap-2 shadow-sm focus-within:border-slate-300 transition min-w-0 w-full sm:w-[12rem] xl:w-[10rem] 2xl:w-[10rem] shrink-0">
                   <Search className="w-4 h-4 text-slate-400 shrink-0" />
                   <input
                     type="text"
@@ -1422,7 +1422,7 @@ export default function KnowledgeCloud({
                   )}
                 </div>
 
-                <div className="flex flex-wrap xl:flex-nowrap items-center justify-start sm:justify-end gap-1.5 min-w-0 flex-1">
+                <div className="flex flex-wrap sm:flex-nowrap items-center justify-start gap-1.5 min-w-0 sm:min-w-max">
                   <div className="flex items-center border border-[#E2E4E9] rounded-xl bg-white p-1 shadow-sm shrink-0">
                     <button
                       onClick={() => setViewMode('grid')}
