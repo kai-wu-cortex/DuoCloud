@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { Suspense, lazy, useState } from 'react';
 import { 
   BookOpen, 
   Database, 
@@ -19,14 +19,26 @@ import {
   ChevronRight
 } from 'lucide-react';
 
-// Custom sub-components
-import KnowledgeCloud from './components/KnowledgeCloud';
-import PracticeCloud from './components/PracticeCloud';
-import CombatToolkit from './components/CombatToolkit';
-
 // Shared data and types
 import { initialProducts, initialPracticeCards, initialKnowledgeAssets } from './data/mockData';
+import { obsidianKnowledgeAssets } from './data/obsidianKnowledgeAssets';
 import { KnowledgeAsset, PracticeCard } from './types';
+import {
+  createKnowledgeAsset,
+  createPracticeCard,
+  formatLocalDate,
+  loadKnowledgeAssets,
+  loadPracticeCards,
+  saveKnowledgeAssets,
+  savePracticeCards,
+} from './lib/appState';
+import { curateKnowledgeAsset, curateKnowledgeAssets } from './lib/knowledgeCuration';
+
+const CombatToolkit = lazy(() => import('./components/CombatToolkit'));
+const KnowledgeCloud = lazy(() => import('./components/KnowledgeCloud'));
+const PracticeCloud = lazy(() => import('./components/PracticeCloud'));
+
+const seededKnowledgeAssets = curateKnowledgeAssets([...obsidianKnowledgeAssets, ...initialKnowledgeAssets]);
 
 export default function App() {
   // Read tab parameter from URL query string
@@ -39,28 +51,58 @@ export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   
   // App-level state for persistent live sandbox interaction
-  const [knowledgeAssets, setKnowledgeAssets] = useState<KnowledgeAsset[]>(initialKnowledgeAssets);
-  const [practiceCards, setPracticeCards] = useState<PracticeCard[]>(initialPracticeCards);
+  const [knowledgeAssets, setKnowledgeAssets] = useState<KnowledgeAsset[]>(() => curateKnowledgeAssets(loadKnowledgeAssets(seededKnowledgeAssets)));
+  const [practiceCards, setPracticeCards] = useState<PracticeCard[]>(() => loadPracticeCards(initialPracticeCards));
 
   // Add new knowledge asset to state
   const handleAddKnowledgeAsset = (newAsset: Omit<KnowledgeAsset, 'id' | 'lastUpdated'>) => {
-    const asset = {
-      ...newAsset,
-      id: `KA-USER-${Date.now().toString().slice(-4)}`,
-      lastUpdated: new Date().toISOString().split('T')[0]
-    } as KnowledgeAsset;
-    setKnowledgeAssets([asset, ...knowledgeAssets]);
+    const asset = curateKnowledgeAsset(createKnowledgeAsset(newAsset));
+    setKnowledgeAssets(prevAssets => {
+      const nextAssets = [asset, ...prevAssets];
+      saveKnowledgeAssets(nextAssets);
+      return nextAssets;
+    });
+  };
+
+  const handleUpdateKnowledgeAsset = (updatedAsset: KnowledgeAsset) => {
+    const today = formatLocalDate();
+    const assetWithUpdatedDate = curateKnowledgeAsset({
+      ...updatedAsset,
+      lastUpdated: today,
+      localEditedAt: today,
+    } as KnowledgeAsset);
+
+    setKnowledgeAssets(prevAssets => {
+      const nextAssets = prevAssets.map(asset => (
+        asset.id === assetWithUpdatedDate.id ? assetWithUpdatedDate : asset
+      ));
+      saveKnowledgeAssets(nextAssets);
+      return nextAssets;
+    });
+  };
+
+  const handleImportKnowledgeAssets = (newAssets: Array<Omit<KnowledgeAsset, 'id' | 'lastUpdated'>>) => {
+    if (newAssets.length === 0) return;
+
+    const importSeed = Date.now().toString().slice(-6);
+    setKnowledgeAssets(prevAssets => {
+      const importedAssets = newAssets.map((asset, index) => curateKnowledgeAsset(createKnowledgeAsset(asset, {
+        idSeed: `IMP-${importSeed}-${index.toString(36).toUpperCase()}`,
+      })));
+      const nextAssets = [...importedAssets, ...prevAssets];
+      saveKnowledgeAssets(nextAssets);
+      return nextAssets;
+    });
   };
 
   // Add new practice card to state
   const handleAddPracticeCard = (newCard: Omit<PracticeCard, 'id' | 'evidenceNo' | 'testDate'>) => {
-    const card: PracticeCard = {
-      ...newCard,
-      id: `PC-USER-${Date.now().toString().slice(-4)}`,
-      evidenceNo: `SY-2026-${Date.now().toString().slice(-4)}`,
-      testDate: new Date().toISOString().split('T')[0]
-    };
-    setPracticeCards([card, ...practiceCards]);
+    const card = createPracticeCard(newCard);
+    setPracticeCards(prevCards => {
+      const nextCards = [card, ...prevCards];
+      savePracticeCards(nextCards);
+      return nextCards;
+    });
   };
 
   const navItems = [
@@ -198,25 +240,30 @@ export default function App() {
 
         {/* Primary Viewport Pane */}
         <main className="flex-1 overflow-y-auto bg-background p-4 md:p-6" id="primary-viewport">
-          {activeTab === 'toolkit' && (
-            <CombatToolkit 
-              products={initialProducts} 
-              practiceCards={practiceCards} 
-            />
-          )}
-          {activeTab === 'knowledge' && (
-            <KnowledgeCloud 
-              assets={knowledgeAssets} 
-              onAddAsset={handleAddKnowledgeAsset} 
-            />
-          )}
-          {activeTab === 'practice' && (
-            <PracticeCloud 
-              cards={practiceCards} 
-              knowledgeAssets={knowledgeAssets}
-              onAddCard={handleAddPracticeCard} 
-            />
-          )}
+          <Suspense fallback={<div className="h-full min-h-[360px] flex items-center justify-center text-sm font-bold text-on-surface-variant">正在加载双云工作台...</div>}>
+            {activeTab === 'toolkit' && (
+              <CombatToolkit 
+                products={initialProducts} 
+                practiceCards={practiceCards} 
+              />
+            )}
+            {activeTab === 'knowledge' && (
+              <KnowledgeCloud 
+                assets={knowledgeAssets} 
+                onAddAsset={handleAddKnowledgeAsset}
+                onUpdateAsset={handleUpdateKnowledgeAsset}
+                onImportAssets={handleImportKnowledgeAssets}
+                isAppSidebarCollapsed={isSidebarCollapsed}
+              />
+            )}
+            {activeTab === 'practice' && (
+              <PracticeCloud 
+                cards={practiceCards} 
+                knowledgeAssets={knowledgeAssets}
+                onAddCard={handleAddPracticeCard} 
+              />
+            )}
+          </Suspense>
         </main>
 
         {/* Minimalized Footer info bar */}

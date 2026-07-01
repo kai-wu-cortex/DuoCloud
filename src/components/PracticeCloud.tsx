@@ -45,11 +45,19 @@ import {
   Send
 } from 'lucide-react';
 import { PracticeCard, KnowledgeAsset, KnowledgeTableType } from '../types';
+import { addDaysToDateString } from '../lib/appState';
 
 interface PracticeCloudProps {
   cards: PracticeCard[];
   knowledgeAssets: KnowledgeAsset[];
   onAddCard: (newCard: Omit<PracticeCard, 'id' | 'evidenceNo' | 'testDate'>) => void;
+}
+
+interface ActivityLogEntry {
+  id: string;
+  author: string;
+  message: string;
+  time: string;
 }
 
 const RECOMMEND_LEVELS = {
@@ -98,11 +106,27 @@ export default function PracticeCloud({ cards, knowledgeAssets, onAddCard }: Pra
   const [viewMode, setViewMode] = useState<'split' | 'grid'>('split');
   const [detailTab, setDetailTab] = useState<'activity' | 'metrics' | 'risk' | 'rules'>('activity');
   const [isStarred, setIsStarred] = useState(false);
+  const [activityDraft, setActivityDraft] = useState('');
+  const [activityLogsByCard, setActivityLogsByCard] = useState<Record<string, ActivityLogEntry[]>>(() => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const saved = window.localStorage.getItem('duocloud-practice-activity-logs');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
 
   useEffect(() => {
     setDetailTab('activity');
     setIsStarred(false);
+    setActivityDraft('');
   }, [selectedCardId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('duocloud-practice-activity-logs', JSON.stringify(activityLogsByCard));
+  }, [activityLogsByCard]);
 
   // Form State for new test log
   const [sku, setSku] = useState('K-600');
@@ -236,10 +260,37 @@ export default function PracticeCloud({ cards, knowledgeAssets, onAddCard }: Pra
     navigate(`/evidence/${evNo}`);
   };
 
+  const handlePublishActivityLog = (card: PracticeCard) => {
+    const message = activityDraft.trim();
+    if (!message) return;
+
+    const now = new Date();
+    const time = now.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+    const author = operator.trim() || card.operator || '当前用户';
+    const entry: ActivityLogEntry = {
+      id: `${card.id}-${now.getTime()}`,
+      author,
+      message,
+      time
+    };
+
+    setActivityLogsByCard((prev) => ({
+      ...prev,
+      [card.id]: [entry, ...(prev[card.id] || [])]
+    }));
+    setActivityDraft('');
+    triggerToast('动态日志已发表');
+  };
+
   const renderSidebarDetailContent = (card: PracticeCard, onClose?: () => void) => {
     // calculate average rating to determine status
     const avgScore = (card.results.clearness + card.results.adhesion + card.results.gloss + card.results.abrasion) / 4;
     const isApproved = avgScore >= 4;
+    const userActivityLogs = activityLogsByCard[card.id] || [];
 
     return (
       <div className="flex flex-col h-full bg-white select-none font-sans text-left" id={`sidebar-detail-${card.id}`}>
@@ -377,7 +428,7 @@ export default function PracticeCloud({ cards, knowledgeAssets, onAddCard }: Pra
                 <span>交付日期</span>
               </div>
               <div className="flex-1 text-slate-700 font-semibold text-left">
-                <span>{card.testDate} 至 {card.testDate.replace(/-(\d+)-(\d+)/, (_, m, d) => `-${m}-${parseInt(d)+3}`)} (3个工作日内)</span>
+                <span>{card.testDate} 至 {addDaysToDateString(card.testDate, 3)} (3个工作日内)</span>
               </div>
             </div>
 
@@ -473,12 +524,66 @@ export default function PracticeCloud({ cards, knowledgeAssets, onAddCard }: Pra
           <div className="pt-2 text-left">
             {detailTab === 'activity' && (
               <div className="space-y-6">
+                <div className="bg-white border border-slate-200/80 rounded-2xl p-3 shadow-xs">
+                  <div className="flex items-start gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-black text-sm shrink-0">
+                      {(operator.trim() || card.operator || '我').slice(0, 1)}
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <textarea
+                        value={activityDraft}
+                        onChange={(event) => setActivityDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                            event.preventDefault();
+                            handlePublishActivityLog(card);
+                          }
+                        }}
+                        placeholder="发表一条打样动态，例如：已完成第二轮实烫复核，边缘毛刺已消除。"
+                        className="w-full min-h-[76px] resize-y rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2.5 text-xs font-medium leading-relaxed text-slate-800 placeholder:text-slate-400 outline-none transition focus:border-primary/60 focus:bg-white focus:ring-2 focus:ring-primary/10"
+                      />
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[10px] font-semibold text-slate-400">
+                          Ctrl/⌘ + Enter 快速发表
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handlePublishActivityLog(card)}
+                          disabled={!activityDraft.trim()}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-primary-container disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          发表日志
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Section Today */}
                 <div className="space-y-4">
                   <h5 className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">Today</h5>
                   
                   {/* Timeline container */}
                   <div className="relative pl-5 border-l-2 border-slate-100 ml-2.5 space-y-6">
+                    {userActivityLogs.map((log) => (
+                      <div className="relative" key={log.id}>
+                        <span className="absolute -left-[27px] top-0.5 bg-indigo-500 text-white w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold border-2 border-white shadow-sm">
+                          +
+                        </span>
+                        <div className="text-xs rounded-xl bg-indigo-50/60 border border-indigo-100 px-3 py-2.5">
+                          <div className="mb-1">
+                            <span className="font-bold text-slate-800">{log.author}</span>
+                            <span className="text-slate-500"> 发表了动态日志 </span>
+                            <span className="text-[10px] text-slate-400 ml-2">{log.time}</span>
+                          </div>
+                          <p className="whitespace-pre-wrap break-words text-slate-700 leading-relaxed font-medium">
+                            {log.message}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+
                     {/* Node 1 */}
                     <div className="relative">
                       <span className="absolute -left-[27px] top-0.5 bg-emerald-500 text-white w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold border-2 border-white shadow-sm">
@@ -867,11 +972,6 @@ export default function PracticeCloud({ cards, knowledgeAssets, onAddCard }: Pra
                           : 'bg-surface border-transparent hover:border-outline-variant hover:bg-surface-variant/40'
                       }`}
                     >
-                      {/* Left active colored bar indicator */}
-                      {isSelected && (
-                        <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#5F52EE] rounded-xl"></div>
-                      )}
-
                       {/* Left status badge icon */}
                       <div className={`w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center border ${
                         card.recommendLevel === 'high' ? 'bg-emerald-50 border-emerald-200 text-emerald-600' :

@@ -23,6 +23,11 @@ export interface KnowledgeAssetBase {
   lastUpdated: string;
   author: string;
   content: string;
+  sourcePath?: string;
+  directoryLevel1?: string;
+  directoryLevel2?: string;
+  directoryLevel3?: string;
+  localEditedAt?: string;
 }
 
 export interface ProductMasterAsset extends KnowledgeAssetBase {

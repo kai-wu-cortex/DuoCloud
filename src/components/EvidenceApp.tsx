@@ -25,8 +25,6 @@ import {
   Bold,
   Italic,
   Underline,
-  Link as LinkIcon,
-  List,
   Trash2,
   MoreVertical,
   Calendar,
@@ -53,6 +51,12 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { KnowledgeTableType } from '../types';
+import { createBlankEvidencePage, getPageSelectionAfterDelete, type EvidencePage as Page, type EvidenceSection as Section } from '../lib/evidencePages';
+import { findPracticeCard, formatLocalDate, loadKnowledgeAssets, loadPracticeCards } from '../lib/appState';
+import { createEvidenceReportHtml, getEvidenceReportDownloadName } from '../lib/evidenceReport';
+import { createEvidenceShareText } from '../lib/shareLinks';
+import { getEvidenceInspectorModel } from '../lib/evidenceInspector';
+import { getEvidenceTextStyleClassName } from '../lib/evidenceSectionStyles';
 
 const CATEGORY_MAP: Record<KnowledgeTableType, { label: string; icon: React.ReactNode; color: string; bgColor: string; borderColor: string }> = {
   product_master: { label: '产品主数据', icon: <Box className="w-4 h-4" />, color: 'text-blue-750', bgColor: 'bg-blue-50', borderColor: 'border-blue-200' },
@@ -66,28 +70,6 @@ const CATEGORY_MAP: Record<KnowledgeTableType, { label: string; icon: React.Reac
   tag_system: { label: '知识标签', icon: <Tag className="w-4 h-4" />, color: 'text-teal-750', bgColor: 'bg-teal-50', borderColor: 'border-teal-200' },
   knowledge_governance: { label: '知识治理', icon: <ShieldAlert className="w-4 h-4" />, color: 'text-indigo-750', bgColor: 'bg-indigo-50', borderColor: 'border-indigo-200' }
 };
-
-interface Section {
-  id: string;
-  type: 'header' | 'text' | 'process_data' | 'image' | 'video' | 'metrics_table' | 'operator_notes' | 'knowledge_refs';
-  title: string;
-  content?: string;
-  imageUrl?: string;
-  videoUrl?: string;
-  videoPlaying?: boolean;
-  videoProgress?: number;
-  isBold?: boolean;
-  isItalic?: boolean;
-  isUnderlined?: boolean;
-  listItems?: string[];
-}
-
-interface Page {
-  id: string;
-  name: string;
-  visible: boolean;
-  sections: Section[];
-}
 
 type TemplateId = 'standard' | 'elegant' | 'technical' | 'minimalist';
 
@@ -192,7 +174,7 @@ export default function EvidenceApp() {
   const navigate = useNavigate();
   
   // Find card synchronously during state initialization to avoid loading screen rendering / white flashes
-  const initialCard = id ? (initialPracticeCards.find(c => c.evidenceNo === id || c.id === id) || null) : null;
+  const initialCard = findPracticeCard(id, loadPracticeCards(initialPracticeCards)) || null;
   const [card, setCard] = useState<PracticeCard | null>(initialCard);
 
   // Core interactive states
@@ -213,9 +195,7 @@ export default function EvidenceApp() {
   const [isAddSectionModalOpen, setIsAddSectionModalOpen] = useState(false);
   const [isAddingRef, setIsAddingRef] = useState(false);
   const [searchRefQuery, setSearchRefQuery] = useState('');
-  const [referencedAssets, setReferencedAssets] = useState<KnowledgeAsset[]>(() => {
-    return initialKnowledgeAssets.slice(0, 2);
-  });
+  const [referencedAssets, setReferencedAssets] = useState<KnowledgeAsset[]>(() => loadKnowledgeAssets(initialKnowledgeAssets).slice(0, 2));
   const [isSizeDropdownOpen, setIsSizeDropdownOpen] = useState(false);
   const [isCustomSize, setIsCustomSize] = useState<boolean>(false);
   const [customWidth, setCustomWidth] = useState<number>(800);
@@ -337,14 +317,18 @@ export default function EvidenceApp() {
 
   // Load card data and initialize pages
   useEffect(() => {
-    const foundCard = initialPracticeCards.find(c => c.evidenceNo === id || c.id === id);
+    const foundCard = findPracticeCard(id, loadPracticeCards(initialPracticeCards));
     if (foundCard) {
       setCard(foundCard);
       setPages(getInitialPagesForCard(foundCard));
       setActiveSectionId('sec-process-data');
       
-      const mockedRefs = initialKnowledgeAssets.slice(0, 2);
+      const mockedRefs = loadKnowledgeAssets(initialKnowledgeAssets).slice(0, 2);
       setReferencedAssets(mockedRefs);
+    } else {
+      setCard(null);
+      setPages([]);
+      setActiveSectionId('');
     }
   }, [id]);
 
@@ -381,6 +365,8 @@ export default function EvidenceApp() {
   }
 
   const activePage = pages.find(p => p.id === activePageId) || pages[0];
+  const activeSection = activePage.sections.find(section => section.id === activeSectionId) ?? null;
+  const inspectorModel = getEvidenceInspectorModel(activeSection, card, referencedAssets);
 
   // Apply layout template properties
   const applyTemplate = (tplId: TemplateId) => {
@@ -529,44 +515,41 @@ export default function EvidenceApp() {
     })));
   };
 
+  const updateSectionMediaUrl = (secId: string, key: 'imageUrl' | 'videoUrl', val: string) => {
+    setPages(prev => prev.map(p => ({
+      ...p,
+      sections: p.sections.map(s => s.id === secId ? { ...s, [key]: val } : s)
+    })));
+  };
+
+  const toggleVideoPlayback = (secId: string) => {
+    setPages(prev => prev.map(p => ({
+      ...p,
+      sections: p.sections.map(s => {
+        if (s.id !== secId || s.type !== 'video') return s;
+        return { ...s, videoPlaying: !s.videoPlaying };
+      })
+    })));
+  };
+
   // Page Operations
   const handleAddPage = () => {
-    const newPageId = `page-${Date.now()}`;
-    const newPage: Page = {
-      id: newPageId,
-      name: `Page ${pages.length + 1}`,
-      visible: true,
-      sections: [
-        {
-          id: `sec-header-${Date.now()}`,
-          type: 'header',
-          title: `全新页面 (页码 ${pages.length + 1})`,
-          content: '双击左侧的导航器可以重命名页面，利用下方的添加组件和主题配置，快速丰富您的对账报告画板。'
-        },
-        {
-          id: `sec-text-${Date.now()}`,
-          type: 'text',
-          title: '空组件段落',
-          content: '请在侧边栏中选择插入图片、操作视频或关联您在知识云库中沉淀的标答文献来完成这页打样佐证。'
-        }
-      ]
-    };
-    setPages(prev => [...prev, newPage]);
-    setActivePageId(newPageId);
-    setActiveSectionId(`sec-header-${Date.now()}`);
+    const { page, activeSectionId: nextActiveSectionId } = createBlankEvidencePage(pages.length + 1);
+    setPages(prev => [...prev, page]);
+    setActivePageId(page.id);
+    setActiveSectionId(nextActiveSectionId);
     triggerToast("已成功新建一个空白画板页");
   };
 
   const handleDeletePage = (pageId: string) => {
-    if (pages.length <= 1) {
+    const nextSelection = getPageSelectionAfterDelete(pages, activePageId, activeSectionId, pageId);
+    if (!nextSelection) {
       triggerToast("无法删除最后一页");
       return;
     }
-    const filtered = pages.filter(p => p.id !== pageId);
-    setPages(filtered);
-    if (activePageId === pageId) {
-      setActivePageId(filtered[0].id);
-    }
+    setPages(nextSelection.pages);
+    setActivePageId(nextSelection.activePageId);
+    setActiveSectionId(nextSelection.activeSectionId);
     triggerToast("页面已从导航器中删除");
   };
 
@@ -591,236 +574,32 @@ export default function EvidenceApp() {
   };
 
   const triggerFileSave = () => {
-    const title = activePage ? activePage.name : "打样排版对账报告";
-    
-    // Process sections to generate structured high-fidelity HTML content matching the UI
-    const sectionsHtml = activePage ? activePage.sections.map((section) => {
-      if (section.type === 'header') {
-        return `
-          <div class="mb-10 pb-6 border-b-2 border-slate-100">
-            <h1 class="text-3xl font-black text-slate-900 tracking-tight mb-3">${section.title}</h1>
-            <p class="text-sm text-slate-500 leading-relaxed max-w-2xl">${section.content || ''}</p>
-          </div>
-        `;
-      }
-      if (section.type === 'text') {
-        return `
-          <div class="mb-8">
-            <h3 class="text-lg font-bold text-slate-800 mb-3 border-l-4 border-indigo-500 pl-3">${section.title}</h3>
-            <p class="text-sm text-slate-650 leading-relaxed whitespace-pre-line">${section.content || ''}</p>
-          </div>
-        `;
-      }
-      if (section.type === 'process_data') {
-        const items = section.listItems?.map(item => {
-          const parts = item.split('：');
-          if (parts.length > 1) {
-            return `
-              <li class="flex items-start text-sm text-slate-700">
-                <span class="bg-indigo-50 text-indigo-700 font-extrabold px-2.5 py-0.5 rounded text-[11px] mr-2.5 border border-indigo-100 shrink-0 font-mono">${parts[0]}</span>
-                <span class="leading-relaxed">${parts[1]}</span>
-              </li>
-            `;
-          }
-          const enParts = item.split(':');
-          if (enParts.length > 1) {
-            return `
-              <li class="flex items-start text-sm text-slate-700">
-                <span class="bg-indigo-50 text-indigo-700 font-extrabold px-2.5 py-0.5 rounded text-[11px] mr-2.5 border border-indigo-100 shrink-0 font-mono">${enParts[0]}</span>
-                <span class="leading-relaxed">${enParts[1]}</span>
-              </li>
-            `;
-          }
-          return `<li class="text-sm text-slate-700 list-disc list-inside leading-relaxed">${item}</li>`;
-        }).join('') || '';
-
-        return `
-          <div class="mb-8 bg-slate-50/70 p-6 rounded-xl border border-slate-200/60">
-            <h3 class="text-base font-bold text-slate-900 mb-2">${section.title}</h3>
-            <p class="text-xs text-slate-400 mb-4 font-medium">${section.content || ''}</p>
-            <ul class="space-y-3">
-              ${items}
-            </ul>
-          </div>
-        `;
-      }
-      if (section.type === 'video' || section.type === 'image') {
-        const mediaUrl = section.type === 'video' ? section.videoUrl : section.imageUrl;
-        const typeLabel = section.type === 'video' ? 'LIVE INSPECTION SCREEN' : '40x INFRARED MICRO-FOCUS';
-        const typeBg = section.type === 'video' ? 'bg-rose-100 text-rose-700' : 'bg-slate-800 text-white';
-        return `
-          <div class="mb-8">
-            <div class="flex items-center justify-between mb-3">
-              <h3 class="text-base font-bold text-slate-900">${section.title}</h3>
-              <span class="text-[10px] font-mono uppercase ${typeBg} px-2.5 py-0.5 rounded-full font-extrabold tracking-wider">${typeLabel}</span>
-            </div>
-            <div class="rounded-xl overflow-hidden border border-slate-200 bg-slate-950 flex justify-center items-center shadow-sm" style="height: 320px;">
-              <img src="${mediaUrl || ''}" alt="${section.title}" class="w-full h-full object-cover" referrerpolicy="no-referrer" />
-            </div>
-            ${section.content ? `<p class="text-xs text-slate-500 italic mt-2.5 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-100">${section.content}</p>` : ''}
-          </div>
-        `;
-      }
-      if (section.type === 'metrics_table') {
-        return `
-          <div class="mb-8">
-            <h3 class="text-base font-bold text-slate-900 mb-3">${section.title}</h3>
-            <div class="overflow-hidden border border-slate-200 rounded-xl shadow-xs">
-              <table class="w-full text-left text-sm border-collapse bg-white">
-                <thead>
-                  <tr class="border-b border-slate-200 bg-slate-50">
-                    <th class="py-3 px-4 font-bold text-slate-500 text-xs uppercase tracking-wider">性能维度 (Metric Category)</th>
-                    <th class="py-3 px-4 font-bold text-slate-500 text-xs uppercase tracking-wider text-center">测试得分 (Rating)</th>
-                    <th class="py-3 px-4 font-bold text-slate-500 text-xs uppercase tracking-wider text-right">协同状态 (Result)</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100">
-                  <tr>
-                    <td class="py-3.5 px-4 text-slate-700 font-medium">图案微观平整清晰度 (Clearness)</td>
-                    <td class="py-3.5 px-4 text-center font-bold text-slate-800 font-mono">${card ? card.results.clearness : 5}/5</td>
-                    <td class="py-3.5 px-4 text-right"><span class="text-[11px] font-bold bg-emerald-50 text-emerald-600 px-2.5 py-0.5 rounded-full border border-emerald-150">PASS 通过</span></td>
-                  </tr>
-                  <tr>
-                    <td class="py-3.5 px-4 text-slate-700 font-medium">3M胶带粘附力测试 (Adhesion Test)</td>
-                    <td class="py-3.5 px-4 text-center font-bold text-slate-800 font-mono">${card ? card.results.adhesion : 5}/5</td>
-                    <td class="py-3.5 px-4 text-right"><span class="text-[11px] font-bold bg-emerald-50 text-emerald-600 px-2.5 py-0.5 rounded-full border border-emerald-150">PASS 通过</span></td>
-                  </tr>
-                  <tr>
-                    <td class="py-3.5 px-4 text-slate-700 font-medium">表面金属光泽饱满度 (Gloss level)</td>
-                    <td class="py-3.5 px-4 text-center font-bold text-slate-800 font-mono">${card ? card.results.gloss : 5}/5</td>
-                    <td class="py-3.5 px-4 text-right"><span class="text-[11px] font-bold bg-emerald-50 text-emerald-600 px-2.5 py-0.5 rounded-full border border-emerald-150">PASS 通过</span></td>
-                  </tr>
-                  <tr>
-                    <td class="py-3.5 px-4 text-slate-700 font-medium">耐摩擦抗刮擦等级 (Abrasion level)</td>
-                    <td class="py-3.5 px-4 text-center font-bold text-slate-800 font-mono">${card ? card.results.abrasion : 5}/5</td>
-                    <td class="py-3.5 px-4 text-right"><span class="text-[11px] font-bold bg-emerald-50 text-emerald-600 px-2.5 py-0.5 rounded-full border border-emerald-150">PASS 通过</span></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        `;
-      }
-      if (section.type === 'operator_notes') {
-        return `
-          <div class="mb-8 border-l-4 border-indigo-600 bg-slate-50/80 p-5 rounded-r-xl">
-            <h4 class="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1.5">${section.title}</h4>
-            <p class="text-sm italic text-slate-700 leading-relaxed font-semibold">"${section.content || ''}"</p>
-          </div>
-        `;
-      }
-      if (section.type === 'knowledge_refs') {
-        const refItems = referencedAssets.map(asset => `
-          <div class="border border-slate-200/80 rounded-xl p-4 bg-white shadow-3xs">
-            <div class="text-[9px] font-bold uppercase tracking-wider text-indigo-500 mb-1">${asset.category.replace('_', ' ')}</div>
-            <div class="text-xs font-extrabold text-slate-800 leading-snug mb-1">${asset.title}</div>
-            <div class="text-[9px] text-slate-400 font-mono">ID: ${asset.id} • 更新时间: ${asset.lastUpdated}</div>
-          </div>
-        `).join('') || `
-          <div class="col-span-2 text-center py-8 text-xs text-slate-400 border border-dashed border-slate-250 rounded-xl bg-slate-50/50">
-            暂无关联文献。
-          </div>
-        `;
-
-        return `
-          <div class="mb-8">
-            <h3 class="text-base font-bold text-slate-900 mb-3">${section.title}</h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              ${refItems}
-            </div>
-          </div>
-        `;
-      }
-      return '';
-    }).join('') : '';
-
-    // Create a spectacular, professional HTML report package
-    const htmlReport = `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <title>${title} - K-600 烫金打样与技术证据报告</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap');
-    body {
-      font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    }
-    @media print {
-      .no-print { display: none !important; }
-      body { background: white !important; color: black !important; padding: 0 !important; margin: 0 !important; }
-      .print-shadow-none { box-shadow: none !important; border: none !important; }
-    }
-  </style>
-</head>
-<body class="bg-slate-50 text-slate-900 min-h-screen">
-  
-  <!-- Interactive Top Bar Inside Saved Document -->
-  <div class="no-print bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-50">
-    <div class="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-black text-sm">OS</div>
-        <div>
-          <h1 class="text-sm font-black tracking-tight">K-600 工艺证据卡离线高保真浏览器</h1>
-          <p class="text-[10px] text-slate-400">已就绪，可在任何标准浏览器中离线阅览</p>
-        </div>
-      </div>
-      <div class="flex items-center gap-2">
-        <button onclick="window.print()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2 px-4 rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-1.5">
-          🖨️ 打印 / 另存为 PDF
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <div class="max-w-3xl mx-auto my-10 px-4">
-    <!-- Main Styled Page Container -->
-    <div class="bg-white rounded-2xl shadow-xl border border-slate-200/80 p-12 print-shadow-none relative">
-      
-      <!-- Brand Watermark Logo -->
-      <div class="flex justify-between items-center mb-10 select-none">
-        <div class="flex items-center gap-2 font-bold text-slate-900">
-          <div class="w-5 h-5 bg-slate-900 rounded-md flex items-center justify-center text-white text-[10px]">L</div>
-          <span class="font-mono text-[10px] tracking-widest uppercase text-slate-400 font-black">DualCloud OS</span>
-        </div>
-        <div class="text-right">
-          <span class="text-[10px] text-slate-400 font-mono">报告编号: ${card ? card.evidenceNo : 'EV-K600'}</span>
-        </div>
-      </div>
-
-      <!-- Core Content -->
-      <div class="space-y-6">
-        ${sectionsHtml}
-      </div>
-
-      <!-- Footer Info -->
-      <div class="mt-16 pt-6 border-t border-slate-100 flex justify-between items-center text-[10px] text-slate-400 select-none">
-        <div>
-          <span class="font-bold text-slate-700">双云工艺证据卡排版系统™</span>
-          <span class="mx-1.5">|</span>
-          <span>高保真标准对账模块</span>
-        </div>
-        <div class="font-mono">
-          导出于: 2026-06-28
-        </div>
-      </div>
-
-    </div>
-  </div>
-
-</body>
-</html>`;
+    const htmlReport = createEvidenceReportHtml({
+      page: activePage,
+      card,
+      referencedAssets,
+      exportDate: formatLocalDate(),
+    });
 
     const blob = new Blob([htmlReport], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${title}_打样对账画册_K-600.html`;
+    link.download = getEvidenceReportDownloadName(activePage, card);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
     triggerToast("✓ 高保真对账报告已成功保存至您的本地设备！");
+  };
+
+  const handleCopyShareLink = async () => {
+    try {
+      await navigator.clipboard.writeText(createEvidenceShareText(window.location.origin, card.evidenceNo));
+      triggerToast("已为您复制该打样画板在线查看链接！");
+    } catch {
+      triggerToast("复制失败，请手动复制浏览器地址栏链接");
+    }
   };
 
   // Simulating download / export
@@ -840,6 +619,293 @@ export default function EvidenceApp() {
         return prev + Math.floor(Math.random() * 15) + 10;
       });
     }, 150);
+  };
+
+  const renderInspectorIcon = () => {
+    if (!activeSection) return <Settings className="w-4 h-4 text-slate-500" />;
+    if (activeSection.type === 'process_data') return <Sliders className="w-4 h-4 text-emerald-600" />;
+    if (activeSection.type === 'metrics_table') return <Table className="w-4 h-4 text-sky-600" />;
+    if (activeSection.type === 'image') return <ImageIcon className="w-4 h-4 text-indigo-600" />;
+    if (activeSection.type === 'video') return <Video className="w-4 h-4 text-rose-600" />;
+    if (activeSection.type === 'knowledge_refs') return <Layers className="w-4 h-4 text-violet-600" />;
+    return <Type className="w-4 h-4 text-slate-600" />;
+  };
+
+  const renderTextInspectorControls = () => {
+    if (!activeSection) return null;
+    return (
+      <div className="space-y-3">
+        {inspectorModel.editors.title && (
+          <label className="block">
+            <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide">模块标题</span>
+            <input
+              id="inspector-section-title"
+              type="text"
+              value={activeSection.title}
+              onChange={(e) => updateSectionTitle(activeSection.id, e.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] font-bold text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+            />
+          </label>
+        )}
+
+        {inspectorModel.editors.content && (
+          <label className="block">
+            <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide">正文内容</span>
+            <textarea
+              id="inspector-section-content"
+              value={activeSection.content ?? ''}
+              onChange={(e) => updateSectionContent(activeSection.id, e.target.value)}
+              rows={activeSection.type === 'header' ? 3 : 4}
+              className="mt-1 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] leading-relaxed text-slate-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+            />
+          </label>
+        )}
+
+        {inspectorModel.editors.styles && (
+          <div>
+            <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide">文字样式</span>
+            <div className="mt-1 grid grid-cols-3 gap-1.5">
+              <button
+                onClick={() => toggleSectionStyle('bold')}
+                className={`flex items-center justify-center rounded-lg border py-2 transition-all ${
+                  activeSection.isBold ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+                }`}
+                title="加粗"
+              >
+                <Bold className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => toggleSectionStyle('italic')}
+                className={`flex items-center justify-center rounded-lg border py-2 transition-all ${
+                  activeSection.isItalic ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+                }`}
+                title="斜体"
+              >
+                <Italic className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => toggleSectionStyle('underline')}
+                className={`flex items-center justify-center rounded-lg border py-2 transition-all ${
+                  activeSection.isUnderlined ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+                }`}
+                title="下划线"
+              >
+                <Underline className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {inspectorModel.editors.listItems && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide">列表数据</span>
+              <button
+                onClick={() => updateSectionListItems(activeSection.id, [...(activeSection.listItems ?? []), '新增参数：'])}
+                className="rounded-md border border-indigo-100 bg-indigo-50 px-2 py-1 text-[10px] font-extrabold text-indigo-700 hover:bg-indigo-100"
+              >
+                <Plus className="inline h-3 w-3 align-[-2px]" /> 条目
+              </button>
+            </div>
+            <div className="space-y-1.5">
+              {(activeSection.listItems ?? []).map((item, idx) => (
+                <div key={`${activeSection.id}-${idx}`} className="flex items-center gap-1.5">
+                  <span className="w-6 text-right text-[10px] font-mono font-bold text-slate-400">{idx + 1}</span>
+                  <input
+                    type="text"
+                    value={item}
+                    onChange={(e) => {
+                      const nextItems = [...(activeSection.listItems ?? [])];
+                      nextItems[idx] = e.target.value;
+                      updateSectionListItems(activeSection.id, nextItems);
+                    }}
+                    className="min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 outline-none focus:border-indigo-400"
+                  />
+                  <button
+                    onClick={() => updateSectionListItems(activeSection.id, (activeSection.listItems ?? []).filter((_, itemIdx) => itemIdx !== idx))}
+                    className="rounded-md p-1.5 text-slate-300 hover:bg-rose-50 hover:text-rose-500"
+                    title="删除条目"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderProcessParameterControls = () => {
+    if (activeSection?.type !== 'process_data') return null;
+    const controls = [
+      { key: 'temp', label: '温度', suffix: '℃', step: 1 },
+      { key: 'pressure', label: '压力', suffix: 'kg', step: 1 },
+      { key: 'speed', label: '速度', suffix: '/h', step: 50 },
+      { key: 'dwellTime', label: '停留', suffix: 's', step: 0.01 },
+    ] as const;
+
+    return (
+      <div className="space-y-2 border-t border-slate-200 pt-3">
+        <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide">实践云参数</span>
+        <div className="grid grid-cols-2 gap-2">
+          {controls.map(control => (
+            <label key={control.key} className="rounded-lg border border-slate-200 bg-white p-2">
+              <span className="block text-[10px] font-bold text-slate-500">{control.label}</span>
+              <div className="mt-1 flex items-center gap-1">
+                <input
+                  type="number"
+                  step={control.step}
+                  value={card.parameters[control.key]}
+                  onChange={(e) => {
+                    const nextValue = Number(e.target.value);
+                    if (!Number.isNaN(nextValue)) updateCardParameter(control.key, nextValue);
+                  }}
+                  className="min-w-0 flex-1 bg-transparent text-right text-[13px] font-black text-slate-900 outline-none"
+                />
+                <span className="text-[10px] font-bold text-slate-400">{control.suffix}</span>
+              </div>
+            </label>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderInspectorDataRows = () => {
+    if (inspectorModel.dataRows.length === 0) return null;
+    return (
+      <div className="space-y-1.5">
+        {inspectorModel.dataRows.map(row => (
+          <div key={`${row.label}-${row.value}`} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
+            <span className="text-[11px] font-bold text-slate-500">{row.label}</span>
+            <span className="text-[12px] font-black text-slate-900 font-mono">{row.value}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderMetricRows = () => {
+    if (inspectorModel.metrics.length === 0) return null;
+    return (
+      <div className="space-y-2">
+        {inspectorModel.metrics.map(metric => (
+          <div key={metric.label} className="rounded-lg border border-slate-200 bg-white p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-600">{metric.label}</span>
+              <span className="text-[12px] font-black text-slate-900 font-mono">{metric.score}/5</span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+              <div className="h-full rounded-full bg-emerald-500" style={{ width: `${(metric.score / 5) * 100}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderMediaControls = () => {
+    if (!activeSection || (activeSection.type !== 'image' && activeSection.type !== 'video')) return null;
+    const mediaKey = activeSection.type === 'image' ? 'imageUrl' : 'videoUrl';
+    const currentHeight = sectionHeights[activeSection.id] || 176;
+
+    return (
+      <div className="space-y-3">
+        <label className="block">
+          <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide">媒体 URL</span>
+          <input
+            id="inspector-media-url"
+            type="url"
+            value={activeSection[mediaKey] ?? ''}
+            onChange={(e) => updateSectionMediaUrl(activeSection.id, mediaKey, e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+          />
+        </label>
+
+        <div>
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide">模块高度</span>
+            <span className="text-[11px] font-black text-indigo-700 font-mono">{currentHeight}px</span>
+          </div>
+          <input
+            type="range"
+            min="100"
+            max="600"
+            step="10"
+            value={currentHeight}
+            onChange={(e) => setSectionHeights(prev => ({ ...prev, [activeSection.id]: Number(e.target.value) }))}
+            className="w-full accent-indigo-600"
+          />
+          <div className="mt-1 grid grid-cols-3 gap-1.5">
+            {[120, 200, 320].map(height => (
+              <button
+                key={height}
+                onClick={() => setSectionHeights(prev => ({ ...prev, [activeSection.id]: height }))}
+                className={`rounded-md border py-1 text-[10px] font-extrabold ${
+                  currentHeight === height ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+                }`}
+              >
+                {height}px
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {activeSection.type === 'video' && (
+          <button
+            onClick={() => toggleVideoPlayback(activeSection.id)}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-900 px-3 py-2 text-[11px] font-extrabold text-white hover:bg-slate-800"
+          >
+            {activeSection.videoPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+            {activeSection.videoPlaying ? '暂停视频' : '播放视频'}
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  const renderReferenceRows = () => {
+    if (inspectorModel.kind !== 'references') return null;
+    return (
+      <div className="space-y-2">
+        <button
+          onClick={() => setIsAddingRef(true)}
+          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-[11px] font-extrabold text-indigo-700 hover:bg-indigo-100"
+        >
+          <Plus className="h-3.5 w-3.5" /> 添加标答参考
+        </button>
+        <div className="space-y-1.5">
+          {inspectorModel.references.map(ref => {
+            const catItem = CATEGORY_MAP[ref.category];
+            return (
+              <div key={ref.id} className="rounded-lg border border-slate-200 bg-white p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="mb-1 flex items-center gap-1.5">
+                      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${catItem.bgColor} ${catItem.color} ${catItem.borderColor}`}>
+                        {React.cloneElement(catItem.icon as React.ReactElement, { className: 'w-3 h-3' })}
+                      </span>
+                      <span className="truncate text-[10px] font-extrabold text-slate-400">{catItem.label}</span>
+                    </div>
+                    <div className="text-[11px] font-black leading-snug text-slate-800">{ref.title}</div>
+                    <div className="mt-1 text-[9.5px] font-mono text-slate-400">{ref.id} · {ref.lastUpdated}</div>
+                  </div>
+                  <button
+                    onClick={() => setReferencedAssets(prev => prev.filter(asset => asset.id !== ref.id))}
+                    className="rounded-md p-1.5 text-slate-300 hover:bg-rose-50 hover:text-rose-500"
+                    title="移出此关联"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -1139,7 +1205,7 @@ export default function EvidenceApp() {
             <Download className="w-3.5 h-3.5" /> 导出PDF画册
           </button>
           <button 
-            onClick={() => triggerToast("已为您复制该打样画板在线查看链接！")}
+            onClick={handleCopyShareLink}
             className="px-3 py-1.5 rounded-lg hover:bg-slate-50 border border-slate-200 transition-colors flex items-center gap-1.5 text-[12px] font-bold text-slate-700"
           >
             <Share2 className="w-3.5 h-3.5" /> 复制分享链接
@@ -1151,7 +1217,7 @@ export default function EvidenceApp() {
       <div className="flex-1 flex overflow-hidden">
         
         {/* Left Sidebar (Navigator, Sections, Styling) */}
-        <aside className="w-[280px] bg-[#FAFAFA] border-r border-slate-200 overflow-y-auto flex flex-col p-4 gap-6 shrink-0 z-10 custom-scrollbar">
+        <aside className="hidden w-[280px] shrink-0 flex-col gap-6 overflow-y-auto border-r border-slate-200 bg-[#FAFAFA] p-4 z-10 custom-scrollbar lg:flex">
           
           {/* 1. Page Template selector card (实现证据卡模板功能) */}
           <div className="space-y-3 bg-white border border-slate-200 rounded-xl p-3 shadow-xs">
@@ -1588,10 +1654,20 @@ export default function EvidenceApp() {
                   
                   const isDragOver = dragOverIdx === idx && draggedIdx !== idx;
                   const isCurrentlyDragged = draggedIdx === idx;
+                  const titleTextStyleClass = getEvidenceTextStyleClassName(section, {
+                    baseWeight: 'font-bold',
+                    activeBoldWeight: 'font-black',
+                  });
+                  const bodyTextStyleClass = getEvidenceTextStyleClassName(section, {
+                    baseWeight: 'font-normal',
+                    activeBoldWeight: 'font-bold',
+                  });
                   
                   return (
                     <div 
                       key={section.id}
+                      data-canvas-section-id={section.id}
+                      data-canvas-section-type={section.type}
                       draggable={dragReadyId === section.id}
                       onDragStart={(e) => handleDragStart(e, idx)}
                       onDragEnd={() => {
@@ -1648,21 +1724,21 @@ export default function EvidenceApp() {
                                 type="text"
                                 value={section.title}
                                 onChange={(e) => updateSectionTitle(section.id, e.target.value)}
-                                className="w-full text-2xl font-bold bg-slate-50 border border-indigo-300 rounded px-2.5 py-1 text-slate-800 outline-none"
+                                className={`w-full text-2xl ${titleTextStyleClass} bg-slate-50 border border-indigo-300 rounded px-2.5 py-1 text-slate-800 outline-none`}
                               />
                               <textarea 
                                 value={section.content}
                                 onChange={(e) => updateSectionContent(section.id, e.target.value)}
-                                className="w-full text-xs bg-slate-50 border border-indigo-300 rounded p-2 text-slate-700 outline-none"
+                                className={`w-full text-xs ${bodyTextStyleClass} bg-slate-50 border border-indigo-300 rounded p-2 text-slate-700 outline-none`}
                                 rows={2}
                               />
                             </div>
                           ) : (
                             <div>
-                              <h1 className={`text-2xl font-bold mb-4 ${section.isBold ? 'font-bold' : ''} ${section.isItalic ? 'italic' : ''} ${section.isUnderlined ? 'underline' : ''}`}>
+                              <h1 className={`text-2xl mb-4 ${titleTextStyleClass}`}>
                                 {section.title}
                               </h1>
-                              <p className="text-xs text-slate-500 leading-relaxed font-normal">
+                              <p className={`text-xs text-slate-500 leading-relaxed ${bodyTextStyleClass}`}>
                                 {section.content}
                               </p>
                             </div>
@@ -1678,21 +1754,21 @@ export default function EvidenceApp() {
                                 type="text"
                                 value={section.title}
                                 onChange={(e) => updateSectionTitle(section.id, e.target.value)}
-                                className="w-full text-sm font-bold bg-slate-50 border border-indigo-300 rounded px-2 py-1 text-slate-800 outline-none"
+                                className={`w-full text-sm ${titleTextStyleClass} bg-slate-50 border border-indigo-300 rounded px-2 py-1 text-slate-800 outline-none`}
                               />
                               <textarea 
                                 value={section.content}
                                 onChange={(e) => updateSectionContent(section.id, e.target.value)}
-                                className="w-full text-xs bg-slate-50 border border-indigo-300 rounded p-2 text-slate-700 outline-none"
+                                className={`w-full text-xs ${bodyTextStyleClass} bg-slate-50 border border-indigo-300 rounded p-2 text-slate-700 outline-none`}
                                 rows={3}
                               />
                             </div>
                           ) : (
                             <div>
-                              <h3 className={`text-sm font-bold mb-2 ${section.isBold ? 'font-bold' : ''} ${section.isItalic ? 'italic' : ''} ${section.isUnderlined ? 'underline' : ''}`}>
+                              <h3 className={`text-sm mb-2 ${titleTextStyleClass}`}>
                                 {section.title}
                               </h3>
-                              <p className={`text-[12.5px] leading-relaxed text-slate-600 ${section.isBold ? 'font-bold' : ''} ${section.isItalic ? 'italic' : ''} ${section.isUnderlined ? 'underline' : ''}`}>
+                              <p className={`text-[12.5px] leading-relaxed text-slate-600 ${bodyTextStyleClass}`}>
                                 {section.content}
                               </p>
                             </div>
@@ -1708,12 +1784,12 @@ export default function EvidenceApp() {
                                 type="text"
                                 value={section.title}
                                 onChange={(e) => updateSectionTitle(section.id, e.target.value)}
-                                className="w-full text-sm font-bold bg-slate-50 border border-indigo-300 rounded px-2 py-1 text-slate-800 outline-none animate-pulse-slow"
+                                className={`w-full text-sm ${titleTextStyleClass} bg-slate-50 border border-indigo-300 rounded px-2 py-1 text-slate-800 outline-none animate-pulse-slow`}
                               />
                               <textarea 
                                 value={section.content}
                                 onChange={(e) => updateSectionContent(section.id, e.target.value)}
-                                className="w-full text-xs bg-slate-50 border border-indigo-300 rounded p-1 text-slate-700 outline-none"
+                                className={`w-full text-xs ${bodyTextStyleClass} bg-slate-50 border border-indigo-300 rounded p-1 text-slate-700 outline-none`}
                                 rows={1}
                               />
                               <div className="space-y-1 bg-slate-50 p-2 rounded border border-slate-200">
@@ -1729,7 +1805,7 @@ export default function EvidenceApp() {
                                         nextItems[lIdx] = e.target.value;
                                         updateSectionListItems(section.id, nextItems);
                                       }}
-                                      className="flex-1 bg-white border border-slate-200 rounded px-1.5 py-0.5 text-xs text-slate-700 outline-none focus:border-indigo-400"
+                                      className={`flex-1 bg-white border border-slate-200 rounded px-1.5 py-0.5 text-xs text-slate-700 outline-none focus:border-indigo-400 ${bodyTextStyleClass}`}
                                     />
                                   </div>
                                 ))}
@@ -1737,8 +1813,8 @@ export default function EvidenceApp() {
                             </div>
                           ) : (
                             <div>
-                              <h3 className="text-sm font-bold text-slate-900 mb-2">{section.title}</h3>
-                              <p className="text-[12px] text-slate-500 mb-3">{section.content}</p>
+                              <h3 className={`text-sm text-slate-900 mb-2 ${titleTextStyleClass}`}>{section.title}</h3>
+                              <p className={`text-[12px] text-slate-500 mb-3 ${bodyTextStyleClass}`}>{section.content}</p>
                               <ul className="list-disc pl-5 space-y-2 text-[12.5px]">
                                 {section.listItems?.map((item, lIdx) => {
                                   // Parse key variable labels
@@ -1747,7 +1823,7 @@ export default function EvidenceApp() {
                                     return (
                                       <li key={lIdx} className="text-slate-650">
                                         <span className="bg-indigo-50 text-indigo-700 font-extrabold px-1.5 py-0.5 rounded mr-1 border border-indigo-100">{parts[0]}</span>
-                                        <span>{parts[1]}</span>
+                                        <span className={bodyTextStyleClass}>{parts[1]}</span>
                                       </li>
                                     );
                                   }
@@ -1756,12 +1832,12 @@ export default function EvidenceApp() {
                                     return (
                                       <li key={lIdx} className="text-slate-650">
                                         <span className="bg-indigo-50 text-indigo-700 font-extrabold px-1.5 py-0.5 rounded mr-1 border border-indigo-100">{enParts[0]}</span>
-                                        <span>{enParts[1]}</span>
+                                        <span className={bodyTextStyleClass}>{enParts[1]}</span>
                                       </li>
                                     );
                                   }
                                   return (
-                                    <li key={lIdx} className="text-slate-655">{item}</li>
+                                    <li key={lIdx} className={`text-slate-655 ${bodyTextStyleClass}`}>{item}</li>
                                   );
                                 })}
                               </ul>
@@ -2110,73 +2186,6 @@ export default function EvidenceApp() {
                         </div>
                       )}
 
-                      {/* Rich-Text floating formatting toolbar - dynamically floats below the selected content block */}
-                      <AnimatePresence>
-                        {isSelected && (
-                          <motion.div 
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: 10 }}
-                            className="absolute top-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-white border border-slate-200 shadow-xl rounded-xl flex items-center p-1.5 z-30 gap-1 select-none"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <button 
-                              onClick={() => toggleSectionStyle('bold')}
-                              className={`p-1.5 rounded transition-colors ${section.isBold ? 'bg-slate-100 text-indigo-600 font-bold' : 'hover:bg-slate-50 text-slate-500'}`}
-                              title="加粗文字 (Bold)"
-                            >
-                              <Bold className="w-3.5 h-3.5" />
-                            </button>
-                            <button 
-                              onClick={() => toggleSectionStyle('italic')}
-                              className={`p-1.5 rounded transition-colors ${section.isItalic ? 'bg-slate-100 text-indigo-600' : 'hover:bg-slate-50 text-slate-500'}`}
-                              title="斜体文字 (Italic)"
-                            >
-                              <Italic className="w-3.5 h-3.5" />
-                            </button>
-                            <button 
-                              onClick={() => toggleSectionStyle('underline')}
-                              className={`p-1.5 rounded transition-colors ${section.isUnderlined ? 'bg-slate-100 text-indigo-600' : 'hover:bg-slate-50 text-slate-500'}`}
-                              title="下划线文字 (Underline)"
-                            >
-                              <Underline className="w-3.5 h-3.5" />
-                            </button>
-
-                            <div className="w-px h-4 bg-slate-250 mx-1" />
-                            <button 
-                              onClick={() => triggerToast("已将所选文本内容对齐")}
-                              className="px-2 py-1.5 hover:bg-slate-100 rounded text-slate-650 text-[10px] font-bold flex items-center gap-0.5"
-                            >
-                              正文字体 <ChevronDown className="w-3 h-3 text-slate-400" />
-                            </button>
-                            <div className="w-px h-4 bg-slate-250 mx-1" />
-
-                            <button 
-                              onClick={() => triggerToast("超链接配置功能已就绪")}
-                              className="p-1.5 hover:bg-slate-100 rounded text-slate-500"
-                              title="插入超链接"
-                            >
-                              <LinkIcon className="w-3.5 h-3.5" />
-                            </button>
-                            <button 
-                              onClick={() => triggerToast("列表结构已调整")}
-                              className="p-1.5 hover:bg-slate-100 rounded text-slate-500"
-                              title="列表项目符号"
-                            >
-                              <List className="w-3.5 h-3.5" />
-                            </button>
-                            <div className="w-px h-4 bg-slate-250 mx-1" />
-                            <button 
-                              onClick={() => handleDeleteSection(section.id)}
-                              className="p-1.5 hover:bg-rose-50 text-rose-500 rounded transition-colors"
-                              title="彻底移除该模块"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-
                     </div>
                   );
                 })}
@@ -2192,6 +2201,91 @@ export default function EvidenceApp() {
             </div>
           </div>
         </main>
+
+        <aside
+          id="section-inspector-panel"
+          data-section-type={activeSection?.type ?? 'page'}
+          className="flex w-[320px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-slate-200 bg-[#FAFAFA] p-4 custom-scrollbar"
+        >
+          <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-xs">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-50">
+                  {renderInspectorIcon()}
+                </div>
+                <div className="min-w-0">
+                  <h2 className="truncate text-[13px] font-extrabold text-slate-800">{inspectorModel.panelTitle}</h2>
+                  <div className="mt-0.5 flex items-center gap-1.5">
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-black text-slate-500">
+                      {inspectorModel.sectionLabel}
+                    </span>
+                    <span className="truncate text-[9.5px] font-mono text-slate-400">
+                      {activeSection?.id ?? activePage.id}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              {activeSection && (
+                <button
+                  onClick={() => handleDeleteSection(activeSection.id)}
+                  className="rounded-lg p-1.5 text-slate-300 hover:bg-rose-50 hover:text-rose-500"
+                  title="删除当前模块"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-slate-150 bg-slate-50 p-2.5">
+              <div className="mb-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
+                {activeSection ? '当前模块' : '当前页面'}
+              </div>
+              <div className="line-clamp-2 text-[12px] font-extrabold leading-snug text-slate-800">
+                {activeSection?.title ?? activePage.name}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {!activeSection && (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-xs">
+                  <div className="text-[11px] font-medium text-slate-500">
+                    {activePage.sections.length} 个模块 · {activePage.visible ? '导出可见' : '导出隐藏'}
+                  </div>
+                </div>
+                {renderInspectorDataRows()}
+              </div>
+            )}
+
+            {activeSection && (
+              <>
+                <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-xs">
+                  <div className="flex items-center justify-between text-[13px] font-bold text-slate-700">
+                    <div className="flex items-center gap-2">
+                      <Sliders className="h-3.5 w-3.5 text-indigo-500" />
+                      <span>模块设置</span>
+                    </div>
+                  </div>
+
+                  {renderTextInspectorControls()}
+                  {renderProcessParameterControls()}
+                  {renderMediaControls()}
+                </div>
+
+                {(inspectorModel.dataRows.length > 0 || inspectorModel.metrics.length > 0) && (
+                  <div className="space-y-2">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">数据快照</span>
+                    {renderInspectorDataRows()}
+                    {renderMetricRows()}
+                  </div>
+                )}
+
+                {renderReferenceRows()}
+              </>
+            )}
+          </div>
+        </aside>
       </div>
 
       {/* A. Template Switch Modal (实现证据卡模板功能) */}

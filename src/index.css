@@ -38,6 +38,7 @@
 @layer utilities {
   .custom-scrollbar::-webkit-scrollbar {
     width: 6px;
+    height: 6px;
   }
   .custom-scrollbar::-webkit-scrollbar-track {
     background: transparent;
@@ -48,6 +49,149 @@
   }
   .custom-scrollbar:hover::-webkit-scrollbar-thumb {
     background-color: #cbd5e1;
+  }
+
+  .knowledge-grid-card {
+    border-radius: 24px;
+    overflow: hidden;
+    isolation: isolate;
+    background-clip: padding-box;
+    transform-style: preserve-3d;
+  }
+
+  .knowledge-rich-editor a,
+  .knowledge-rich-output a {
+    color: #5F52EE;
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .knowledge-rich-editor img,
+  .knowledge-rich-output img {
+    display: block;
+    max-width: 100%;
+    max-height: 220px;
+    border-radius: 10px;
+    border: 1px solid #E2E4E9;
+    margin-top: 8px;
+    object-fit: contain;
+    cursor: zoom-in;
+  }
+
+  .knowledge-rich-editor ul,
+  .knowledge-rich-editor ol,
+  .knowledge-rich-output ul,
+  .knowledge-rich-output ol {
+    margin-left: 1.2rem;
+    padding-left: 0.5rem;
+  }
+
+  .knowledge-rich-editor ul,
+  .knowledge-rich-output ul {
+    list-style: disc;
+  }
+
+  .knowledge-rich-editor ol,
+  .knowledge-rich-output ol {
+    list-style: decimal;
+  }
+
+  .knowledge-rich-editor h1,
+  .knowledge-rich-editor h2,
+  .knowledge-rich-editor h3,
+  .knowledge-rich-output h1,
+  .knowledge-rich-output h2,
+  .knowledge-rich-output h3 {
+    margin: 0.35rem 0 0.2rem;
+    font-weight: 900;
+    color: #0D0B3D;
+    line-height: 1.25;
+  }
+
+  .knowledge-rich-editor h1,
+  .knowledge-rich-output h1 {
+    font-size: 1.15rem;
+  }
+
+  .knowledge-rich-editor h2,
+  .knowledge-rich-output h2 {
+    font-size: 1.05rem;
+  }
+
+  .knowledge-rich-editor h3,
+  .knowledge-rich-output h3 {
+    font-size: 0.95rem;
+  }
+
+  .knowledge-rich-editor p,
+  .knowledge-rich-output p {
+    margin: 0.35rem 0;
+  }
+
+  .knowledge-rich-editor blockquote,
+  .knowledge-rich-output blockquote {
+    margin: 0.5rem 0;
+    padding-left: 0.75rem;
+    border-left: 3px solid #5F52EE;
+    color: #525866;
+  }
+
+  .knowledge-rich-editor code,
+  .knowledge-rich-output code {
+    border-radius: 6px;
+    background: #EEF2FF;
+    color: #3730A3;
+    padding: 0.1rem 0.35rem;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.92em;
+  }
+
+  .knowledge-rich-editor pre,
+  .knowledge-rich-output pre {
+    overflow-x: auto;
+    border-radius: 10px;
+    background: #0D0B3D;
+    color: #F4F5FA;
+    padding: 0.75rem;
+    margin: 0.5rem 0;
+  }
+
+  .knowledge-rich-editor pre code,
+  .knowledge-rich-output pre code {
+    background: transparent;
+    color: inherit;
+    padding: 0;
+  }
+
+  .knowledge-rich-editor table,
+  .knowledge-rich-output table {
+    display: block;
+    overflow-x: auto;
+    overflow-y: hidden;
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.6rem 0;
+    border-radius: 10px;
+    font-size: 0.92em;
+  }
+
+  .knowledge-rich-editor th,
+  .knowledge-rich-editor td,
+  .knowledge-rich-output th,
+  .knowledge-rich-output td {
+    min-width: 8rem;
+    border: 1px solid #E2E4E9;
+    padding: 0.45rem 0.55rem;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .knowledge-rich-editor th,
+  .knowledge-rich-output th {
+    background: #F4F5FA;
+    color: #0D0B3D;
+    font-weight: 900;
   }
 }
 
@@ -88,4 +232,3 @@
     border-radius: 0 !important;
   }
 }
-
