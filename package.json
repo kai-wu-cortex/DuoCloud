@@ -12,6 +12,7 @@
     "create:knowledge-user": "tsx scripts/createKnowledgeUser.ts",
     "import:seed-knowledge": "tsx scripts/importSeedKnowledgeToMongo.ts",
     "sync:obsidian-knowledge": "tsx scripts/syncObsidianKnowledge.ts",
+    "migrate:obsidian-images": "tsx scripts/migrateObsidianImagesToBlob.ts",
     "test": "tsx --test src/**/*.test.ts"
   },
   "dependencies": {
@@ -33,6 +34,7 @@
     "react-dom": "^19.0.1",
     "react-router-dom": "^7.18.0",
     "react-use-measure": "^2.1.7",
+    "sharp": "^0.35.3",
     "vite": "^6.2.3"
   },
   "devDependencies": {
