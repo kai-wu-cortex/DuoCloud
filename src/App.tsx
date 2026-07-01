@@ -3,20 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { Suspense, lazy, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { 
   BookOpen, 
   Database, 
   Cpu, 
-  Settings,
   Workflow, 
   Menu,
   X,
-  FileText,
-  User,
-  ExternalLink,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  LogOut,
+  UserRound
 } from 'lucide-react';
 
 // Shared data and types
@@ -24,21 +22,35 @@ import { initialProducts, initialPracticeCards, initialKnowledgeAssets } from '.
 import { obsidianKnowledgeAssets } from './data/obsidianKnowledgeAssets';
 import { KnowledgeAsset, PracticeCard } from './types';
 import {
-  createKnowledgeAsset,
   createPracticeCard,
-  formatLocalDate,
   loadKnowledgeAssets,
   loadPracticeCards,
   saveKnowledgeAssets,
   savePracticeCards,
 } from './lib/appState';
 import { curateKnowledgeAsset, curateKnowledgeAssets } from './lib/knowledgeCuration';
+import DuoCloudLogin from './components/DuoCloudLogin';
+import { AuthUser, getDuoCloudSession, signInToDuoCloud, signOutOfDuoCloud } from './lib/authApi';
+import {
+  KnowledgeApiError,
+  bulkImportKnowledgeAssets,
+  bulkPatchKnowledgeAssets,
+  createRemoteKnowledgeAsset,
+  deleteRemoteKnowledgeAsset,
+  exportRemoteKnowledgeAssets,
+  listKnowledgeAssets,
+  updateRemoteKnowledgeAsset,
+} from './lib/knowledgeApi';
 
 const CombatToolkit = lazy(() => import('./components/CombatToolkit'));
 const KnowledgeCloud = lazy(() => import('./components/KnowledgeCloud'));
 const PracticeCloud = lazy(() => import('./components/PracticeCloud'));
 
 const seededKnowledgeAssets = curateKnowledgeAssets([...obsidianKnowledgeAssets, ...initialKnowledgeAssets]);
+
+function loadLocalKnowledgeFallback() {
+  return curateKnowledgeAssets(loadKnowledgeAssets(seededKnowledgeAssets));
+}
 
 export default function App() {
   // Read tab parameter from URL query string
@@ -49,50 +61,146 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'toolkit' | 'knowledge' | 'practice'>(initialTab);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [authStatus, setAuthStatus] = useState<'checking' | 'authenticated' | 'unauthenticated'>('checking');
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [knowledgeCloudStatus, setKnowledgeCloudStatus] = useState<'idle' | 'loading' | 'online' | 'offline'>('idle');
   
   // App-level state for persistent live sandbox interaction
-  const [knowledgeAssets, setKnowledgeAssets] = useState<KnowledgeAsset[]>(() => curateKnowledgeAssets(loadKnowledgeAssets(seededKnowledgeAssets)));
+  const [knowledgeAssets, setKnowledgeAssets] = useState<KnowledgeAsset[]>(loadLocalKnowledgeFallback);
   const [practiceCards, setPracticeCards] = useState<PracticeCard[]>(() => loadPracticeCards(initialPracticeCards));
 
-  // Add new knowledge asset to state
-  const handleAddKnowledgeAsset = (newAsset: Omit<KnowledgeAsset, 'id' | 'lastUpdated'>) => {
-    const asset = curateKnowledgeAsset(createKnowledgeAsset(newAsset));
-    setKnowledgeAssets(prevAssets => {
-      const nextAssets = [asset, ...prevAssets];
-      saveKnowledgeAssets(nextAssets);
-      return nextAssets;
-    });
-  };
+  const refreshKnowledgeAssets = useCallback(async () => {
+    setKnowledgeCloudStatus('loading');
 
-  const handleUpdateKnowledgeAsset = (updatedAsset: KnowledgeAsset) => {
-    const today = formatLocalDate();
-    const assetWithUpdatedDate = curateKnowledgeAsset({
-      ...updatedAsset,
-      lastUpdated: today,
-      localEditedAt: today,
-    } as KnowledgeAsset);
+    try {
+      const remoteAssets = curateKnowledgeAssets(await listKnowledgeAssets());
+      setKnowledgeAssets(remoteAssets);
+      saveKnowledgeAssets(remoteAssets);
+      setKnowledgeCloudStatus('online');
+    } catch (error) {
+      if (error instanceof KnowledgeApiError && error.code === 'UNAUTHORIZED') {
+        setAuthUser(null);
+        setAuthStatus('unauthenticated');
+        setAuthError(error.message);
+        setKnowledgeAssets([]);
+        setKnowledgeCloudStatus('idle');
+        return;
+      }
 
-    setKnowledgeAssets(prevAssets => {
-      const nextAssets = prevAssets.map(asset => (
-        asset.id === assetWithUpdatedDate.id ? assetWithUpdatedDate : asset
+      setKnowledgeAssets(currentAssets => (
+        currentAssets.length > 0 ? currentAssets : loadLocalKnowledgeFallback()
       ));
-      saveKnowledgeAssets(nextAssets);
-      return nextAssets;
-    });
+      setKnowledgeCloudStatus('offline');
+    }
+  }, []);
+
+  const handleKnowledgeApiError = useCallback((error: unknown, fallback: string) => {
+    const message = error instanceof Error ? error.message : fallback;
+    if (error instanceof KnowledgeApiError && error.code === 'UNAUTHORIZED') {
+      setAuthUser(null);
+      setAuthStatus('unauthenticated');
+      setAuthError(message);
+      setKnowledgeAssets([]);
+      setKnowledgeCloudStatus('idle');
+      return;
+    }
+    setAuthError(message);
+    throw error;
+  }, []);
+
+  // Add new knowledge asset to state
+  const handleAddKnowledgeAsset = async (newAsset: Omit<KnowledgeAsset, 'id' | 'lastUpdated'>) => {
+    try {
+      const asset = curateKnowledgeAsset(await createRemoteKnowledgeAsset(newAsset));
+      setKnowledgeAssets(prevAssets => {
+        const nextAssets = [asset, ...prevAssets];
+        saveKnowledgeAssets(nextAssets);
+        return nextAssets;
+      });
+      setKnowledgeCloudStatus('online');
+      setAuthError(null);
+      return asset;
+    } catch (error) {
+      handleKnowledgeApiError(error, '新增知识卡片失败。');
+      throw error;
+    }
   };
 
-  const handleImportKnowledgeAssets = (newAssets: Array<Omit<KnowledgeAsset, 'id' | 'lastUpdated'>>) => {
-    if (newAssets.length === 0) return;
+  const handleUpdateKnowledgeAsset = async (updatedAsset: KnowledgeAsset) => {
+    try {
+      const savedAsset = curateKnowledgeAsset(await updateRemoteKnowledgeAsset(updatedAsset));
+      setKnowledgeAssets(prevAssets => {
+        const nextAssets = prevAssets.map(asset => (
+          asset.id === savedAsset.id ? savedAsset : asset
+        ));
+        saveKnowledgeAssets(nextAssets);
+        return nextAssets;
+      });
+      setKnowledgeCloudStatus('online');
+      setAuthError(null);
+      return savedAsset;
+    } catch (error) {
+      handleKnowledgeApiError(error, '更新知识卡片失败。');
+      throw error;
+    }
+  };
 
-    const importSeed = Date.now().toString().slice(-6);
-    setKnowledgeAssets(prevAssets => {
-      const importedAssets = newAssets.map((asset, index) => curateKnowledgeAsset(createKnowledgeAsset(asset, {
-        idSeed: `IMP-${importSeed}-${index.toString(36).toUpperCase()}`,
-      })));
-      const nextAssets = [...importedAssets, ...prevAssets];
-      saveKnowledgeAssets(nextAssets);
-      return nextAssets;
-    });
+  const handleImportKnowledgeAssets = async (newAssets: Array<Omit<KnowledgeAsset, 'id' | 'lastUpdated'>>) => {
+    if (newAssets.length === 0) return { created: 0, updated: 0, skipped: 0, failed: 0, errors: [] };
+
+    try {
+      const result = await bulkImportKnowledgeAssets(newAssets);
+      await refreshKnowledgeAssets();
+      setAuthError(null);
+      return result;
+    } catch (error) {
+      handleKnowledgeApiError(error, '导入知识卡片失败。');
+      throw error;
+    }
+  };
+
+  const handleBulkUpdateKnowledgeAssets = async (updatedAssets: KnowledgeAsset[]) => {
+    try {
+      const curatedAssets = curateKnowledgeAssets(updatedAssets);
+      const result = await bulkPatchKnowledgeAssets({ assets: curatedAssets });
+      await refreshKnowledgeAssets();
+      setAuthError(null);
+      return result;
+    } catch (error) {
+      handleKnowledgeApiError(error, '批量更新知识卡片失败。');
+      throw error;
+    }
+  };
+
+  const handleDeleteKnowledgeAsset = async (asset: KnowledgeAsset) => {
+    try {
+      const version = typeof (asset as KnowledgeAsset & { serverVersion?: unknown }).serverVersion === 'number'
+        ? (asset as KnowledgeAsset & { serverVersion: number }).serverVersion
+        : 0;
+      await deleteRemoteKnowledgeAsset(asset.id, version);
+      setKnowledgeAssets(prevAssets => {
+        const nextAssets = prevAssets.filter(item => item.id !== asset.id);
+        saveKnowledgeAssets(nextAssets);
+        return nextAssets;
+      });
+      setAuthError(null);
+    } catch (error) {
+      handleKnowledgeApiError(error, '删除知识卡片失败。');
+      throw error;
+    }
+  };
+
+  const handleExportKnowledgeAssets = async () => {
+    try {
+      const assets = curateKnowledgeAssets(await exportRemoteKnowledgeAssets());
+      setAuthError(null);
+      return assets;
+    } catch (error) {
+      handleKnowledgeApiError(error, '导出知识卡片失败。');
+      throw error;
+    }
   };
 
   // Add new practice card to state
@@ -110,6 +218,100 @@ export default function App() {
     { id: 'knowledge', label: '知识云标答库', desc: 'Knowledge Cloud', icon: BookOpen },
     { id: 'practice', label: '实践云证据卡', desc: 'Practice Cloud', icon: Database },
   ] as const;
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSession = async () => {
+      try {
+        const user = await getDuoCloudSession();
+        if (!isMounted) return;
+
+        setAuthUser(user);
+        setAuthStatus(user ? 'authenticated' : 'unauthenticated');
+      } catch (error) {
+        if (!isMounted) return;
+
+        const message = error instanceof Error ? error.message : '登录状态验证失败。';
+        setAuthError(message);
+        setAuthUser(null);
+        setAuthStatus('unauthenticated');
+      }
+    };
+
+    void loadSession();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (authStatus !== 'authenticated') return;
+    void refreshKnowledgeAssets();
+  }, [authStatus, refreshKnowledgeAssets]);
+
+  const handleSignIn = async (username: string, password: string) => {
+    setIsSigningIn(true);
+    setAuthError(null);
+
+    try {
+      const user = await signInToDuoCloud(username, password);
+      setAuthUser(user);
+      setAuthStatus('authenticated');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '登录失败。';
+      setAuthUser(null);
+      setAuthStatus('unauthenticated');
+      setAuthError(message);
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    setAuthError(null);
+
+    try {
+      await signOutOfDuoCloud();
+      setAuthUser(null);
+      setAuthError(null);
+      setAuthStatus('unauthenticated');
+      setKnowledgeAssets([]);
+      setKnowledgeCloudStatus('idle');
+      setIsMobileMenuOpen(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '退出登录失败。';
+      setAuthError(message);
+    }
+  };
+
+  if (authStatus === 'checking') {
+    return (
+      <div className="min-h-screen bg-background text-on-background flex items-center justify-center p-6">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
+            <Workflow className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-lg font-bold text-primary">Double Cloud</p>
+            <p className="text-sm text-on-surface-variant">正在验证知识云登入状态...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (authStatus !== 'authenticated' || !authUser) {
+    return (
+      <DuoCloudLogin
+        isConfigured={true}
+        isSigningIn={isSigningIn}
+        error={authError}
+        onSignIn={handleSignIn}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background text-on-background flex font-sans selection:bg-primary/10 selection:text-primary" id="app-container">
@@ -196,6 +398,29 @@ export default function App() {
         {/* Sidebar Footer Details */}
         <div className="space-y-2">
           <div className="border-b border-outline-variant/50" />
+
+          <div className={`flex items-center ${isSidebarCollapsed ? 'md:justify-center md:p-1.5' : 'gap-3 p-2.5'} rounded-xl border border-outline-variant/60 bg-surface-container-high/60`}>
+            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
+              <UserRound className="w-4 h-4" />
+            </div>
+            <div className={`min-w-0 text-left ${isSidebarCollapsed ? 'md:hidden' : 'block'}`}>
+              <p className="text-[11px] font-bold text-on-surface truncate">{authUser.username}</p>
+              <p className="text-[10px] text-on-surface-variant/80 font-mono uppercase">{authUser.role}</p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => {
+              void handleSignOut();
+            }}
+            className={`w-full flex items-center rounded-xl border border-outline-variant/60 bg-surface-container-high/40 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition ${
+              isSidebarCollapsed ? 'md:justify-center md:px-0 px-3 py-2.5' : 'gap-3 px-3 py-2.5'
+            }`}
+            title={isSidebarCollapsed ? '退出登录' : undefined}
+          >
+            <LogOut className="w-4 h-4 shrink-0" />
+            <span className={`text-[11px] font-bold ${isSidebarCollapsed ? 'md:hidden' : 'block'}`}>退出登录</span>
+          </button>
           
           <div className={`flex items-center ${isSidebarCollapsed ? 'md:justify-center md:p-1' : 'gap-4 p-2.5'} rounded-xl bg-surface-container-high/60`}>
             <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-xs shrink-0">
@@ -240,6 +465,11 @@ export default function App() {
 
         {/* Primary Viewport Pane */}
         <main className="flex-1 overflow-y-auto bg-background p-4 md:p-6" id="primary-viewport">
+          {authError && (
+            <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+              {authError}
+            </div>
+          )}
           <Suspense fallback={<div className="h-full min-h-[360px] flex items-center justify-center text-sm font-bold text-on-surface-variant">正在加载双云工作台...</div>}>
             {activeTab === 'toolkit' && (
               <CombatToolkit 
@@ -253,6 +483,13 @@ export default function App() {
                 onAddAsset={handleAddKnowledgeAsset}
                 onUpdateAsset={handleUpdateKnowledgeAsset}
                 onImportAssets={handleImportKnowledgeAssets}
+                onBulkUpdateAssets={handleBulkUpdateKnowledgeAssets}
+                onDeleteAsset={handleDeleteKnowledgeAsset}
+                onExportAssets={handleExportKnowledgeAssets}
+                currentUser={authUser}
+                isOffline={knowledgeCloudStatus === 'offline'}
+                isSyncing={knowledgeCloudStatus === 'loading'}
+                onRefreshAssets={refreshKnowledgeAssets}
                 isAppSidebarCollapsed={isSidebarCollapsed}
               />
             )}

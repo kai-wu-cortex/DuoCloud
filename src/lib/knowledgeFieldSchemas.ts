@@ -1,5 +1,5 @@
-import type { KnowledgeAsset, KnowledgeTableType } from '../types';
-import { formatLocalDate } from './appState';
+import type { KnowledgeAsset, KnowledgeTableType } from '../types.ts';
+import { formatLocalDate } from './appState.ts';
 
 export type KnowledgeFieldType = 'text' | 'textarea' | 'select';
 

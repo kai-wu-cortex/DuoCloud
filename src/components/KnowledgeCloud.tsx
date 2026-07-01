@@ -4,7 +4,7 @@ import {
   Search, BookOpen, Plus, Tag, Calendar, User, Filter, Sliders, DollarSign, ShieldAlert, Truck, MessageSquare, Layers, X, PlusCircle, CheckCircle2,
   Box, Puzzle, BookText, AlertTriangle, HelpCircle, MoreHorizontal, FileText, Video,
   LayoutGrid, List as ListIcon, Folder, Sparkles, Pencil,
-  Bold, Italic, Underline, Link, Image as ImageIcon, Paperclip, ExternalLink, Upload, Download, Code2, Eye, Maximize2, Save, RotateCcw
+  Bold, Italic, Underline, Link, Image as ImageIcon, Paperclip, ExternalLink, Upload, Download, Code2, Eye, Maximize2, Save, RotateCcw, Trash2
 } from 'lucide-react';
 import { KnowledgeAsset, KnowledgeTableType } from '../types';
 import { formatLocalDate } from '../lib/appState';
@@ -23,12 +23,21 @@ import {
 } from '../lib/knowledgeImportExport';
 import { getKnowledgePreviewText } from '../lib/knowledgePreview';
 import { DEFAULT_MARKDOWN_EDITOR_MODE, getMarkdownEditorModeValue, type MarkdownEditorMode } from '../lib/markdownEditorModes';
+import type { AuthUser } from '../lib/authApi';
+import { uploadKnowledgeAttachment, type KnowledgeApiBulkResult, type KnowledgeAttachmentUploadResult } from '../lib/knowledgeApi';
 
 interface KnowledgeCloudProps {
   assets: KnowledgeAsset[];
-  onAddAsset: (newAsset: Omit<KnowledgeAsset, 'id' | 'lastUpdated'>) => void;
-  onUpdateAsset: (asset: KnowledgeAsset) => void;
-  onImportAssets?: (newAssets: Array<Omit<KnowledgeAsset, 'id' | 'lastUpdated'>>) => void;
+  onAddAsset: (newAsset: Omit<KnowledgeAsset, 'id' | 'lastUpdated'>) => Promise<KnowledgeAsset>;
+  onUpdateAsset: (asset: KnowledgeAsset) => Promise<KnowledgeAsset>;
+  onImportAssets?: (newAssets: Array<Omit<KnowledgeAsset, 'id' | 'lastUpdated'>>) => Promise<KnowledgeApiBulkResult>;
+  onBulkUpdateAssets: (assets: KnowledgeAsset[]) => Promise<KnowledgeApiBulkResult>;
+  onDeleteAsset: (asset: KnowledgeAsset) => Promise<void>;
+  onExportAssets: () => Promise<KnowledgeAsset[]>;
+  currentUser: AuthUser;
+  isOffline: boolean;
+  isSyncing?: boolean;
+  onRefreshAssets: () => Promise<void>;
   isAppSidebarCollapsed?: boolean;
 }
 
@@ -152,13 +161,23 @@ function isImageAttachmentUrl(value: string) {
 }
 
 function isOpenableAttachmentUrl(value: string) {
+  if (/^obsidian:/i.test(value)) return false;
+  if (/internal-api-drive-stream\.feishu\.cn/i.test(value)) return false;
   return /^(https?:\/\/|\/|data:image\/)/i.test(value);
+}
+
+function isDisplayableAttachmentLabel(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return false;
+  if (['obsidia', 'obsidian', 'undefined', 'null'].includes(normalized)) return false;
+  return true;
 }
 
 function collectKnowledgeAttachments(asset: KnowledgeAsset): KnowledgeAttachmentItem[] {
   const attachments: KnowledgeAttachmentItem[] = [];
   const seen = new Set<string>();
   const addAttachment = (item: Omit<KnowledgeAttachmentItem, 'id'>) => {
+    if (!isDisplayableAttachmentLabel(item.label)) return;
     const previewSrc = item.previewSrc && isOpenableAttachmentUrl(item.previewSrc) ? item.previewSrc : undefined;
     const href = item.href && (item.href.startsWith('/evidence/') || isOpenableAttachmentUrl(item.href)) ? item.href : undefined;
     if (!previewSrc && !href) return;
@@ -253,19 +272,40 @@ interface RichKnowledgeEditorProps {
   placeholder?: string;
   minHeight?: string;
   onChange: (value: string) => void;
+  uploadContext?: {
+    assetId?: string;
+    fieldName?: string;
+  };
+  onUploadAttachment?: (
+    file: File,
+    context: { assetId?: string; fieldName?: string; kind: 'image' | 'file' },
+  ) => Promise<KnowledgeAttachmentUploadResult>;
+  onUploadError?: (message: string) => void;
 }
 
-function RichKnowledgeEditor({ id, value, placeholder, minHeight = 'min-h-[92px]', onChange }: RichKnowledgeEditorProps) {
+function RichKnowledgeEditor({
+  id,
+  value,
+  placeholder,
+  minHeight = 'min-h-[92px]',
+  onChange,
+  uploadContext,
+  onUploadAttachment,
+  onUploadError,
+}: RichKnowledgeEditorProps) {
   const editorRef = useRef<HTMLDivElement | null>(null);
   const fullscreenEditorRef = useRef<HTMLDivElement | null>(null);
   const previewEditorRef = useRef<HTMLDivElement | null>(null);
   const fullscreenPreviewEditorRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fullscreenTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const isComposingRef = useRef(false);
   const [editorMode, setEditorMode] = useState<MarkdownEditorMode>(DEFAULT_MARKDOWN_EDITOR_MODE);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
+  const [uploadingKind, setUploadingKind] = useState<'image' | 'file' | null>(null);
   const draftKey = `duocloud:knowledge-editor-draft:${id}`;
   const hasRichMarkup = (html: string) => /<(b|strong|i|em|u|a|img|ul|ol|li|table|thead|tbody|tr|th|td|h[1-6]|pre|code|blockquote)\b/i.test(html);
   const hasMarkdownSyntax = (text: string) => /(^|\n)\s{0,3}(#{1,6}\s+|[-*+]\s+|\d+\.\s+|>\s+|```|\|.+\|)|!\[[^\]]*]\([^)]+\)|\[[^\]]+]\([^)]+\)|\*\*[^*]+\*\*|__[^_]+__|`[^`]+`/.test(text);
@@ -329,6 +369,23 @@ function RichKnowledgeEditor({ id, value, placeholder, minHeight = 'min-h-[92px]
     });
   };
 
+  const insertMarkdownAtCursor = (snippet: string) => {
+    const textarea = getActiveTextarea();
+    if (!textarea) {
+      onChange(`${value}${value ? '\n' : ''}${snippet}`);
+      return;
+    }
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const nextValue = `${value.slice(0, start)}${snippet}${value.slice(end)}`;
+    onChange(nextValue);
+    window.requestAnimationFrame(() => {
+      textarea.focus();
+      const nextCursor = start + snippet.length;
+      textarea.setSelectionRange(nextCursor, nextCursor);
+    });
+  };
+
   const applyCommand = (command: string, commandValue?: string) => {
     if (editorMode === 'code') {
       if (command === 'bold') applyMarkdownWrap('**');
@@ -342,6 +399,35 @@ function RichKnowledgeEditor({ id, value, placeholder, minHeight = 'min-h-[92px]
     syncFromEditor();
   };
 
+  const escapeHtml = (text: string) => text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+  const insertAttachmentMarkup = (
+    upload: KnowledgeAttachmentUploadResult,
+    kind: 'image' | 'file',
+  ) => {
+    const label = upload.fileName || (kind === 'image' ? '图片' : '附件');
+    if (editorMode === 'code') {
+      const markdown = kind === 'image'
+        ? `![${label}](${upload.url})`
+        : `[${label}](${upload.url})`;
+      insertMarkdownAtCursor(markdown);
+      return;
+    }
+
+    const safeLabel = escapeHtml(label);
+    const safeUrl = escapeHtml(upload.url);
+    const html = kind === 'image'
+      ? `<img src="${safeUrl}" alt="${safeLabel}" />`
+      : `<a href="${safeUrl}" target="_blank" rel="noreferrer">${safeLabel}</a>`;
+    document.execCommand('insertHTML', false, html);
+    syncFromEditor();
+  };
+
   const insertLink = () => {
     const url = window.prompt('输入链接 URL');
     if (!url) return;
@@ -349,9 +435,36 @@ function RichKnowledgeEditor({ id, value, placeholder, minHeight = 'min-h-[92px]
   };
 
   const insertImage = () => {
+    if (onUploadAttachment) {
+      imageInputRef.current?.click();
+      return;
+    }
     const url = window.prompt('输入图片 URL');
     if (!url) return;
     applyCommand('insertImage', url);
+  };
+
+  const handleAttachmentUpload = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+    kind: 'image' | 'file',
+  ) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !onUploadAttachment || uploadingKind) return;
+
+    setUploadingKind(kind);
+    try {
+      const upload = await onUploadAttachment(file, {
+        assetId: uploadContext?.assetId,
+        fieldName: uploadContext?.fieldName ?? id,
+        kind,
+      });
+      insertAttachmentMarkup(upload, kind === 'image' || upload.contentType.startsWith('image/') ? 'image' : 'file');
+    } catch (error) {
+      onUploadError?.(error instanceof Error ? error.message : '附件上传失败');
+    } finally {
+      setUploadingKind(null);
+    }
   };
 
   const applyMarkdown = () => {
@@ -437,8 +550,11 @@ function RichKnowledgeEditor({ id, value, placeholder, minHeight = 'min-h-[92px]
         <button type="button" title="插入链接" onClick={insertLink} className="w-8 h-8 inline-flex items-center justify-center rounded-lg text-slate-600 hover:bg-white hover:text-primary transition cursor-pointer">
           <Link className="w-4 h-4" />
         </button>
-        <button type="button" title="插入图片 URL" onClick={insertImage} className="w-8 h-8 inline-flex items-center justify-center rounded-lg text-slate-600 hover:bg-white hover:text-primary transition cursor-pointer">
-          <ImageIcon className="w-4 h-4" />
+        <button type="button" title={onUploadAttachment ? '上传并插入图片' : '插入图片 URL'} onClick={insertImage} disabled={uploadingKind !== null} className="w-8 h-8 inline-flex items-center justify-center rounded-lg text-slate-600 hover:bg-white hover:text-primary transition cursor-pointer disabled:opacity-45 disabled:cursor-wait">
+          <ImageIcon className={`w-4 h-4 ${uploadingKind === 'image' ? 'animate-pulse' : ''}`} />
+        </button>
+        <button type="button" title="上传并插入附件" onClick={() => attachmentInputRef.current?.click()} disabled={!onUploadAttachment || uploadingKind !== null} className="w-8 h-8 inline-flex items-center justify-center rounded-lg text-slate-600 hover:bg-white hover:text-primary transition cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed">
+          <Paperclip className={`w-4 h-4 ${uploadingKind === 'file' ? 'animate-pulse' : ''}`} />
         </button>
         <span className="h-5 w-px bg-outline-variant/70 mx-1 shrink-0" />
         <button type="button" title="应用 Markdown" onClick={applyMarkdown} className="w-8 h-8 inline-flex items-center justify-center rounded-lg text-slate-600 hover:bg-white hover:text-primary transition cursor-pointer">
@@ -541,6 +657,21 @@ function RichKnowledgeEditor({ id, value, placeholder, minHeight = 'min-h-[92px]
 
   return (
     <>
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(event) => handleAttachmentUpload(event, 'image')}
+        aria-label="上传知识云图片"
+      />
+      <input
+        ref={attachmentInputRef}
+        type="file"
+        className="hidden"
+        onChange={(event) => handleAttachmentUpload(event, 'file')}
+        aria-label="上传知识云附件"
+      />
       <div className="min-w-0 bg-white border border-outline-variant rounded-xl shadow-sm overflow-hidden focus-within:border-primary/50">
         {renderToolbar()}
         {renderEditorBody(id, minHeight)}
@@ -595,7 +726,20 @@ function RichKnowledgeEditor({ id, value, placeholder, minHeight = 'min-h-[92px]
   );
 }
 
-export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onImportAssets, isAppSidebarCollapsed = false }: KnowledgeCloudProps) {
+export default function KnowledgeCloud({
+  assets,
+  onAddAsset,
+  onUpdateAsset,
+  onImportAssets,
+  onBulkUpdateAssets,
+  onDeleteAsset,
+  onExportAssets,
+  currentUser,
+  isOffline,
+  isSyncing = false,
+  onRefreshAssets,
+  isAppSidebarCollapsed = false,
+}: KnowledgeCloudProps) {
   const [activeCategory, setActiveCategory] = useState<KnowledgeTableType | 'all'>('all');
   const [activeDirectoryPath, setActiveDirectoryPath] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -623,6 +767,8 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
   const [renderLimit, setRenderLimit] = useState(GRID_BATCH_SIZE);
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const canEdit = !isOffline && (currentUser.role === 'editor' || currentUser.role === 'admin');
+  const canAdmin = !isOffline && currentUser.role === 'admin';
 
   // New Asset Form State
   const [newTitle, setNewTitle] = useState('');
@@ -654,11 +800,19 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
   };
 
   const openCreateAssetDrawer = () => {
+    if (!canEdit) {
+      showToast(isOffline ? '离线缓存模式下暂不能新增知识卡片' : '当前账号没有编辑权限');
+      return;
+    }
     resetKnowledgeForm();
     setIsModalOpen(true);
   };
 
   const openEditAssetDrawer = (asset: KnowledgeAsset) => {
+    if (!canEdit) {
+      showToast(isOffline ? '离线缓存模式下暂不能编辑知识卡片' : '当前账号没有编辑权限');
+      return;
+    }
     const schema = getKnowledgeFieldSchema(asset.category);
     const nextFields = createInitialKnowledgeFields(asset.category);
     for (const field of schema.fields) {
@@ -681,8 +835,12 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
   };
 
   // Handle Form Submission
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) {
+      showToast(isOffline ? '离线缓存模式下暂不能保存知识卡片' : '当前账号没有编辑权限');
+      return;
+    }
     const validation = validateKnowledgeAssetDraft({
       category: newCategory,
       title: newTitle,
@@ -717,12 +875,24 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
         id: editingAsset.id,
         lastUpdated: formatLocalDate(),
       } as KnowledgeAsset;
-      onUpdateAsset(updatedAsset);
-      setSelectedAsset(updatedAsset);
-      setToastMsg('知识卡片已更新');
-      setTimeout(() => setToastMsg(null), 2400);
+      try {
+        const savedAsset = await onUpdateAsset(updatedAsset);
+        setSelectedAsset(savedAsset);
+        showToast('知识卡片已同步更新');
+      } catch (error) {
+        console.error('Failed to update knowledge asset', error);
+        showToast(error instanceof Error ? error.message : '知识卡片更新失败', 3600);
+        return;
+      }
     } else {
-      onAddAsset(draft);
+      try {
+        await onAddAsset(draft);
+        showToast('知识卡片已同步创建');
+      } catch (error) {
+        console.error('Failed to create knowledge asset', error);
+        showToast(error instanceof Error ? error.message : '知识卡片创建失败', 3600);
+        return;
+      }
     }
 
     closeAssetForm();
@@ -827,41 +997,73 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
     setTimeout(() => setToastMsg(null), duration);
   };
 
+  const handleEditorAttachmentUpload = async (
+    file: File,
+    context: { assetId?: string; fieldName?: string; kind: 'image' | 'file' },
+  ) => {
+    if (!canEdit) {
+      throw new Error(isOffline ? '离线缓存模式下暂不能上传附件' : '当前账号没有编辑权限');
+    }
+    const result = await uploadKnowledgeAttachment({
+      file,
+      assetId: context.assetId,
+      fieldName: context.fieldName,
+    });
+    showToast(context.kind === 'image' ? '图片已上传并插入' : '附件已上传并插入');
+    return result;
+  };
+
   const handleImportWorkbook = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
+    if (!canAdmin) {
+      showToast(isOffline ? '离线缓存模式下暂不能导入知识卡片' : '当前账号没有批量导入权限');
+      return;
+    }
     if (!onImportAssets) {
       showToast('当前页面未接入批量导入能力');
       return;
     }
 
+    let importedAssets: Array<Omit<KnowledgeAsset, 'id' | 'lastUpdated'>>;
     try {
-      const { importedAssets } = await parseKnowledgeImportWorkbook(file);
+      ({ importedAssets } = await parseKnowledgeImportWorkbook(file));
       if (importedAssets.length === 0) {
         showToast('未识别到可导入的知识云字段，请检查模板工作表和表头', 3600);
         return;
       }
-      onImportAssets(importedAssets);
-      showToast(`已按模板导入 ${importedAssets.length} 张知识卡片`, 3200);
     } catch (error) {
-      console.error('Failed to import knowledge workbook', error);
+      console.error('Failed to parse knowledge workbook', error);
       showToast('导入失败：请确认文件为知识云字段模板 Excel', 3600);
+      return;
+    }
+
+    try {
+      const result = await onImportAssets(importedAssets);
+      showToast(`导入完成：新增 ${result.created}，更新 ${result.updated}，跳过 ${result.skipped}，失败 ${result.failed}`, 3600);
+    } catch (error) {
+      console.error('Failed to import knowledge assets', error);
+      showToast(error instanceof Error ? error.message : '导入失败：知识云同步服务暂不可用', 3600);
     }
   };
 
   const handleExportWorkbook = async () => {
-    const exportAssets = filteredAssets.length > 0 ? filteredAssets : assets;
     try {
-      await exportKnowledgeAssetsWorkbook(exportAssets);
-      showToast(`已导出 ${exportAssets.length} 张知识卡片`);
+      const remoteAssets = await onExportAssets();
+      await exportKnowledgeAssetsWorkbook(remoteAssets);
+      showToast(`已导出 ${remoteAssets.length} 张知识卡片`);
     } catch (error) {
       console.error('Failed to export knowledge workbook', error);
-      showToast('导出失败：请稍后重试');
+      showToast(error instanceof Error ? error.message : '导出失败：请稍后重试');
     }
   };
 
   const toggleEditMode = () => {
+    if (!canEdit) {
+      showToast(isOffline ? '离线缓存模式下暂不能进入编辑模式' : '当前账号没有编辑权限');
+      return;
+    }
     setIsEditMode(prev => {
       const next = !prev;
       if (!next) {
@@ -892,6 +1094,10 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
   };
 
   const openBulkEditDrawer = () => {
+    if (!canAdmin) {
+      showToast(isOffline ? '离线缓存模式下暂不能批量编辑' : '当前账号没有批量编辑权限');
+      return;
+    }
     if (selectedAssetIds.length === 0) {
       showToast('请先选择要批量编辑的知识卡片');
       return;
@@ -904,8 +1110,12 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
     resetBulkEditForm();
   };
 
-  const applyBulkEdit = (event: React.FormEvent) => {
+  const applyBulkEdit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (!canAdmin) {
+      showToast(isOffline ? '离线缓存模式下暂不能批量编辑' : '当前账号没有批量编辑权限');
+      return;
+    }
     if (selectedAssets.length === 0) {
       showToast('请先选择要批量编辑的知识卡片');
       return;
@@ -928,7 +1138,7 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
       return;
     }
 
-    selectedAssets.forEach(asset => {
+    const nextAssets = selectedAssets.map(asset => {
       const nextAsset: Record<string, any> = { ...asset };
 
       if (bulkCategory) {
@@ -959,12 +1169,37 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
       }
 
       nextAsset.lastUpdated = formatLocalDate();
-      onUpdateAsset(nextAsset as KnowledgeAsset);
+      return nextAsset as KnowledgeAsset;
     });
 
-    showToast(`已批量更新 ${selectedAssets.length} 张知识卡片`);
-    setSelectedAssetIds([]);
-    closeBulkEditDrawer();
+    try {
+      const result = await onBulkUpdateAssets(nextAssets);
+      showToast(`批量同步完成：新增 ${result.created}，更新 ${result.updated}，跳过 ${result.skipped}，失败 ${result.failed}`, 3600);
+      setSelectedAssetIds([]);
+      closeBulkEditDrawer();
+    } catch (error) {
+      console.error('Failed to bulk update knowledge assets', error);
+      showToast(error instanceof Error ? error.message : '批量编辑同步失败', 3600);
+    }
+  };
+
+  const handleDeleteSelectedAsset = async () => {
+    if (!selectedAsset) return;
+    if (!canAdmin) {
+      showToast(isOffline ? '离线缓存模式下暂不能删除知识卡片' : '当前账号没有删除权限');
+      return;
+    }
+    if (!window.confirm(`确认删除知识卡片「${selectedAsset.title}」？`)) return;
+
+    try {
+      await onDeleteAsset(selectedAsset);
+      showToast('知识卡片已删除');
+      setSelectedAsset(null);
+      setSelectedAssetIds(prev => prev.filter(id => id !== selectedAsset.id));
+    } catch (error) {
+      console.error('Failed to delete knowledge asset', error);
+      showToast(error instanceof Error ? error.message : '知识卡片删除失败', 3600);
+    }
   };
 
   const renderDetailFields = (asset: KnowledgeAsset) => {
@@ -1137,6 +1372,9 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
                   placeholder={field.placeholder || `录入${field.label}`}
                   onChange={(nextValue) => handleDynamicChange(field.name, nextValue)}
                   minHeight={field.type === 'textarea' ? 'min-h-[112px]' : 'min-h-[76px]'}
+                  uploadContext={{ assetId: editingAsset?.id, fieldName: field.name }}
+                  onUploadAttachment={handleEditorAttachmentUpload}
+                  onUploadError={(message) => showToast(message, 3600)}
                 />
               )}
             </div>
@@ -1297,7 +1535,7 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
       {/* Main content column on the right */}
       <div className="flex-1 flex flex-col gap-5 overflow-hidden lg:pl-[17.5rem]">
         <div className="flex flex-col gap-3 pb-2 shrink-0">
-          <div className="grid grid-cols-1 xl:grid-cols-[minmax(220px,1fr)_minmax(360px,520px)_auto] items-center gap-3">
+          <div className="flex flex-col gap-3">
             <h1 className="text-xl md:text-2xl font-black text-[#0D0B3D] tracking-tight flex flex-wrap items-baseline gap-x-2 gap-y-1 min-w-0">
               <span>{categoryTitle}</span>
               {activeDirectoryLabel && <span className="text-[#5F52EE] text-sm font-black">/ {activeDirectoryLabel}</span>}
@@ -1309,139 +1547,173 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
               )}
             </h1>
 
-            <div className="relative bg-white border border-[#E2E4E9] rounded-xl px-4 py-2.5 flex items-center gap-2 shadow-sm focus-within:border-slate-300 transition min-w-0">
-              <Search className="w-4 h-4 text-slate-400 shrink-0" />
-              <input 
-                type="text" 
-                placeholder="Search for Library..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-transparent text-xs font-bold text-[#0D0B3D] border-none outline-none w-full placeholder-slate-400/80"
-                id="knowledge-search-input"
-              />
-              {searchQuery && (
-                <button onClick={() => setSearchQuery('')} className="text-slate-400 hover:text-slate-600 cursor-pointer">
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            <div className="flex items-center justify-start xl:justify-end gap-2">
-              <div className="flex items-center border border-[#E2E4E9] rounded-xl bg-white p-1 shadow-sm shrink-0">
-                <button
-                  onClick={() => setViewMode('grid')}
-                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                    viewMode === 'grid' 
-                      ? 'bg-[#0D0B3D] text-white shadow-sm' 
-                      : 'text-slate-400 hover:text-slate-600'
-                  }`}
-                  title="Grid View"
-                >
-                  <LayoutGrid className="w-4.5 h-4.5" />
-                </button>
-                <button
-                  onClick={() => setViewMode('list')}
-                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                    viewMode === 'list' 
-                      ? 'bg-[#0D0B3D] text-white shadow-sm' 
-                      : 'text-slate-400 hover:text-slate-600'
-                  }`}
-                  title="List View"
-                >
-                  <ListIcon className="w-4.5 h-4.5" />
-                </button>
-              </div>
-
-              <button
-                type="button"
-                onClick={toggleEditMode}
-                className={`flex items-center justify-center gap-1.5 px-3 py-2.5 font-extrabold text-xs rounded-xl transition shadow-sm cursor-pointer shrink-0 ${
-                  isEditMode
-                    ? 'bg-[#0D0B3D] text-white hover:bg-[#181548]'
-                    : 'bg-white border border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE]'
-                }`}
-                id="knowledge-edit-mode-btn"
-              >
-                <Pencil className="w-4 h-4" />
-                <span>{isEditMode ? '退出编辑' : '编辑模式'}</span>
-              </button>
-
-              <input
-                ref={importInputRef}
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                onChange={handleImportWorkbook}
-                className="hidden"
-                aria-label="导入知识云 Excel 模板"
-              />
-              <button
-                type="button"
-                onClick={() => importInputRef.current?.click()}
-                className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-white border border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] font-extrabold text-xs rounded-xl transition shadow-sm cursor-pointer shrink-0"
-                id="knowledge-import-btn"
-                title="按知识云字段模板导入 Excel"
-              >
-                <Upload className="w-4 h-4" />
-                <span>导入</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleExportWorkbook}
-                className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-white border border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] font-extrabold text-xs rounded-xl transition shadow-sm cursor-pointer shrink-0"
-                id="knowledge-export-btn"
-                title="导出当前筛选结果为知识云字段模板 Excel"
-              >
-                <Download className="w-4 h-4" />
-                <span>导出</span>
-              </button>
-
-              <button
-                onClick={openCreateAssetDrawer}
-                className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-[#5F52EE] hover:bg-[#4E41DC] text-white font-extrabold text-xs rounded-xl transition shadow-md shadow-primary/10 cursor-pointer shrink-0"
-                id="add-knowledge-btn"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Create Library</span>
-              </button>
-
-              {viewMode === 'grid' && (
-                <div className="hidden md:flex items-center gap-2 bg-white border border-[#E2E4E9] rounded-xl p-1 shadow-sm shrink-0">
-                  <div className="flex items-center gap-1 border-r border-[#E2E4E9] pr-2">
-                    <span className="px-1.5 text-[10px] font-black text-slate-400 uppercase tracking-wider">每行</span>
-                    {[3, 4, 5].map(count => (
-                      <button
-                        key={count}
-                        type="button"
-                        onClick={() => setCardsPerRow(count)}
-                        className={`min-w-7 h-7 rounded-lg text-[11px] font-black transition cursor-pointer ${
-                          cardsPerRow === count ? 'bg-[#0D0B3D] text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'
-                        }`}
-                        title={`每行显示 ${count} 张卡片`}
-                      >
-                        {count}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {[
-                      { id: 'regular', label: '常规' },
-                      { id: 'wide', label: '宽' },
-                    ].map(option => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        onClick={() => setCardSpacing(option.id as 'regular' | 'wide')}
-                        className={`h-7 px-2 rounded-lg text-[11px] font-black transition cursor-pointer ${
-                          cardSpacing === option.id ? 'bg-[#5F52EE] text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'
-                        }`}
-                        title={`卡片间距：${option.label}`}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:overflow-x-auto sm:pb-1 sm:[scrollbar-width:none] sm:[&::-webkit-scrollbar]:hidden">
+              <div className="relative bg-white border border-[#E2E4E9] rounded-xl px-3 py-2 flex items-center gap-2 shadow-sm focus-within:border-slate-300 transition min-w-0 w-full sm:w-[12rem] xl:w-[10rem] 2xl:w-[10rem] shrink-0">
+                  <Search className="w-4 h-4 text-slate-400 shrink-0" />
+                  <input
+                    type="text"
+                    placeholder="Search for Library..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="bg-transparent text-xs font-bold text-[#0D0B3D] border-none outline-none w-full placeholder-slate-400/80"
+                    id="knowledge-search-input"
+                  />
+                  {searchQuery && (
+                    <button onClick={() => setSearchQuery('')} className="text-slate-400 hover:text-slate-600 cursor-pointer">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
-              )}
+
+                <div className="flex flex-wrap sm:flex-nowrap items-center justify-start gap-1.5 min-w-0 sm:min-w-max">
+                  <div className="flex items-center border border-[#E2E4E9] rounded-xl bg-white p-1 shadow-sm shrink-0">
+                    <button
+                      onClick={() => setViewMode('grid')}
+                      className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                        viewMode === 'grid'
+                          ? 'bg-[#0D0B3D] text-white shadow-sm'
+                          : 'text-slate-400 hover:text-slate-600'
+                      }`}
+                      title="Grid View"
+                    >
+                      <LayoutGrid className="w-4.5 h-4.5" />
+                    </button>
+                    <button
+                      onClick={() => setViewMode('list')}
+                      className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                        viewMode === 'list'
+                          ? 'bg-[#0D0B3D] text-white shadow-sm'
+                          : 'text-slate-400 hover:text-slate-600'
+                      }`}
+                      title="List View"
+                    >
+                      <ListIcon className="w-4.5 h-4.5" />
+                    </button>
+                  </div>
+
+                  {viewMode === 'grid' && (
+                    <div className="hidden md:flex items-center gap-1 bg-white border border-[#E2E4E9] rounded-xl p-1 shadow-sm shrink-0">
+                      <div className="flex items-center gap-0.5 border-r border-[#E2E4E9] pr-1.5 shrink-0">
+                        <span className="px-1 text-[10px] font-black text-slate-400 uppercase tracking-wider">每行</span>
+                        {[3, 4, 5].map(count => (
+                          <button
+                            key={count}
+                            type="button"
+                            onClick={() => setCardsPerRow(count)}
+                            className={`min-w-6 h-7 rounded-lg text-[11px] font-black transition cursor-pointer ${
+                              cardsPerRow === count ? 'bg-[#0D0B3D] text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'
+                            }`}
+                            title={`每行显示 ${count} 张卡片`}
+                          >
+                            {count}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        {[
+                          { id: 'regular', label: '常规' },
+                          { id: 'wide', label: '宽' },
+                        ].map(option => (
+                          <button
+                            key={option.id}
+                            type="button"
+                            onClick={() => setCardSpacing(option.id as 'regular' | 'wide')}
+                            className={`h-7 px-2 rounded-lg text-[11px] font-black transition cursor-pointer ${
+                              cardSpacing === option.id ? 'bg-[#5F52EE] text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'
+                            }`}
+                            title={`卡片间距：${option.label}`}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={toggleEditMode}
+                    disabled={!canEdit}
+                    className={`flex items-center justify-center gap-1.5 px-2.5 py-2 font-extrabold text-xs rounded-xl transition shadow-sm shrink-0 ${
+                      !canEdit
+                        ? 'bg-slate-100 border border-[#E2E4E9] text-slate-300 cursor-not-allowed'
+                        : isEditMode
+                        ? 'bg-[#0D0B3D] text-white hover:bg-[#181548]'
+                        : 'bg-white border border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] cursor-pointer'
+                    }`}
+                    id="knowledge-edit-mode-btn"
+                    title={!canEdit ? (isOffline ? '离线缓存模式下不可编辑' : '当前账号没有编辑权限') : undefined}
+                  >
+                    <Pencil className="w-4 h-4" />
+                    <span>{isEditMode ? '退出编辑' : '编辑模式'}</span>
+                  </button>
+
+                  <input
+                    ref={importInputRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    onChange={handleImportWorkbook}
+                    className="hidden"
+                    aria-label="导入知识云 Excel 模板"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => importInputRef.current?.click()}
+                    disabled={!canAdmin}
+                    className={`flex items-center justify-center gap-1.5 px-2.5 py-2 border font-extrabold text-xs rounded-xl transition shadow-sm shrink-0 ${
+                      canAdmin
+                        ? 'bg-white border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] cursor-pointer'
+                        : 'bg-slate-100 border-[#E2E4E9] text-slate-300 cursor-not-allowed'
+                    }`}
+                    id="knowledge-import-btn"
+                    title={canAdmin ? '按知识云字段模板导入 Excel' : '仅管理员可导入'}
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>导入</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExportWorkbook}
+                    className="flex items-center justify-center gap-1.5 px-2.5 py-2 bg-white border border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] font-extrabold text-xs rounded-xl transition shadow-sm cursor-pointer shrink-0"
+                    id="knowledge-export-btn"
+                    title="导出当前筛选结果为知识云字段模板 Excel"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>导出</span>
+                  </button>
+
+                  <button
+                    onClick={openCreateAssetDrawer}
+                    disabled={!canEdit}
+                    className={`flex items-center justify-center gap-1.5 px-3 py-2 font-extrabold text-xs rounded-xl transition shadow-md shadow-primary/10 shrink-0 ${
+                      canEdit
+                        ? 'bg-[#5F52EE] hover:bg-[#4E41DC] text-white cursor-pointer'
+                        : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                    }`}
+                    id="add-knowledge-btn"
+                    title={canEdit ? '创建知识卡片' : '当前不可创建知识卡片'}
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Create</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void onRefreshAssets();
+                    }}
+                    disabled={isSyncing}
+                    className={`flex items-center justify-center gap-1.5 px-2.5 py-2 bg-white border border-[#E2E4E9] font-extrabold text-xs rounded-xl transition shadow-sm shrink-0 ${
+                      isSyncing
+                        ? 'text-[#5F52EE] border-[#5F52EE]/40 cursor-wait'
+                        : 'text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] cursor-pointer'
+                    }`}
+                    title={isSyncing ? '正在同步知识云' : '重新同步知识云'}
+                  >
+                    <RotateCcw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                    <span>{isSyncing ? '同步中' : '同步'}</span>
+                  </button>
+                </div>
             </div>
           </div>
 
@@ -1522,9 +1794,10 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
                 <button
                   type="button"
                   onClick={openBulkEditDrawer}
-                  disabled={selectedAssetIds.length === 0}
+                  disabled={!canAdmin || selectedAssetIds.length === 0}
                   className="flex items-center justify-center gap-1.5 px-3 py-2 bg-[#5F52EE] hover:bg-[#4E41DC] disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none text-white font-extrabold text-xs rounded-xl transition shadow-md shadow-primary/10 cursor-pointer disabled:cursor-not-allowed shrink-0"
                   id="bulk-edit-knowledge-btn"
+                  title={canAdmin ? undefined : '仅管理员可批量编辑'}
                 >
                   <Layers className="w-4 h-4" />
                   <span>批量编辑 ({selectedAssetIds.length})</span>
@@ -1627,7 +1900,10 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
                             e.stopPropagation();
                             openEditAssetDrawer(asset);
                           }}
-                          className="flex items-center gap-1 px-3 py-1 bg-white hover:bg-white/95 text-[#5F52EE] font-black text-[10px] rounded-lg shadow-sm transition active:scale-95 cursor-pointer"
+                          disabled={!canEdit}
+                          className={`flex items-center gap-1 px-3 py-1 bg-white font-black text-[10px] rounded-lg shadow-sm transition active:scale-95 ${
+                            canEdit ? 'hover:bg-white/95 text-[#5F52EE] cursor-pointer' : 'text-slate-300 cursor-not-allowed'
+                          }`}
                         >
                           <Pencil className="w-3 h-3" />
                           <span>Modify</span>
@@ -1854,11 +2130,28 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
                   {CATEGORY_MAP[selectedAsset.category].label}
                 </span>
                 <div className="flex items-center gap-2">
+                  {canAdmin && (
+                    <button
+                      type="button"
+                      onClick={handleDeleteSelectedAsset}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition cursor-pointer text-[11px] font-black shadow-sm"
+                      title="删除该知识卡片"
+                      id="delete-selected-knowledge-btn"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      删除
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => openEditAssetDrawer(selectedAsset)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#5F52EE] text-white hover:bg-[#4E41DC] transition cursor-pointer text-[11px] font-black shadow-sm"
-                    title="编辑该知识卡片"
+                    disabled={!canEdit}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition text-[11px] font-black shadow-sm ${
+                      canEdit
+                        ? 'bg-[#5F52EE] text-white hover:bg-[#4E41DC] cursor-pointer'
+                        : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                    }`}
+                    title={canEdit ? '编辑该知识卡片' : '当前不可编辑知识卡片'}
                     id="edit-selected-knowledge-btn"
                   >
                     <Pencil className="w-3.5 h-3.5" />
@@ -2212,6 +2505,9 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
                             placeholder={selectedField.placeholder || `批量修改${selectedField.label}`}
                             onChange={setBulkFieldValue}
                             minHeight={selectedField.type === 'textarea' ? 'min-h-[112px]' : 'min-h-[76px]'}
+                            uploadContext={{ assetId: 'bulk-edit', fieldName: selectedField.name }}
+                            onUploadAttachment={handleEditorAttachmentUpload}
+                            onUploadError={(message) => showToast(message, 3600)}
                           />
                         </div>
                       );
@@ -2245,6 +2541,9 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
                       placeholder="支持 Markdown、图片、链接、URL..."
                       onChange={setBulkContent}
                       minHeight="min-h-[132px]"
+                      uploadContext={{ assetId: 'bulk-edit', fieldName: 'content' }}
+                      onUploadAttachment={handleEditorAttachmentUpload}
+                      onUploadError={(message) => showToast(message, 3600)}
                     />
                   </div>
                 </div>
@@ -2357,6 +2656,9 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
                         value={newContent}
                         onChange={setNewContent}
                         minHeight="min-h-[132px]"
+                        uploadContext={{ assetId: editingAsset?.id, fieldName: 'content' }}
+                        onUploadAttachment={handleEditorAttachmentUpload}
+                        onUploadError={(message) => showToast(message, 3600)}
                       />
                     </div>
 
