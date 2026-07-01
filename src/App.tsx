@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { Suspense, lazy, useEffect, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { 
   BookOpen, 
   Database, 
@@ -33,12 +33,17 @@ import {
 import { curateKnowledgeAsset, curateKnowledgeAssets } from './lib/knowledgeCuration';
 import DuoCloudLogin from './components/DuoCloudLogin';
 import { AuthUser, getDuoCloudSession, signInToDuoCloud, signOutOfDuoCloud } from './lib/authApi';
+import { KnowledgeApiError, listKnowledgeAssets } from './lib/knowledgeApi';
 
 const CombatToolkit = lazy(() => import('./components/CombatToolkit'));
 const KnowledgeCloud = lazy(() => import('./components/KnowledgeCloud'));
 const PracticeCloud = lazy(() => import('./components/PracticeCloud'));
 
 const seededKnowledgeAssets = curateKnowledgeAssets([...obsidianKnowledgeAssets, ...initialKnowledgeAssets]);
+
+function loadLocalKnowledgeFallback() {
+  return curateKnowledgeAssets(loadKnowledgeAssets(seededKnowledgeAssets));
+}
 
 export default function App() {
   // Read tab parameter from URL query string
@@ -53,10 +58,35 @@ export default function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
+  const [knowledgeCloudStatus, setKnowledgeCloudStatus] = useState<'idle' | 'loading' | 'online' | 'offline'>('idle');
   
   // App-level state for persistent live sandbox interaction
-  const [knowledgeAssets, setKnowledgeAssets] = useState<KnowledgeAsset[]>(() => curateKnowledgeAssets(loadKnowledgeAssets(seededKnowledgeAssets)));
+  const [knowledgeAssets, setKnowledgeAssets] = useState<KnowledgeAsset[]>([]);
   const [practiceCards, setPracticeCards] = useState<PracticeCard[]>(() => loadPracticeCards(initialPracticeCards));
+
+  const refreshKnowledgeAssets = useCallback(async () => {
+    setKnowledgeCloudStatus('loading');
+    setKnowledgeAssets(loadLocalKnowledgeFallback());
+
+    try {
+      const remoteAssets = curateKnowledgeAssets(await listKnowledgeAssets());
+      setKnowledgeAssets(remoteAssets);
+      saveKnowledgeAssets(remoteAssets);
+      setKnowledgeCloudStatus('online');
+    } catch (error) {
+      if (error instanceof KnowledgeApiError && error.code === 'UNAUTHORIZED') {
+        setAuthUser(null);
+        setAuthStatus('unauthenticated');
+        setAuthError(error.message);
+        setKnowledgeAssets([]);
+        setKnowledgeCloudStatus('idle');
+        return;
+      }
+
+      setKnowledgeAssets(loadLocalKnowledgeFallback());
+      setKnowledgeCloudStatus('offline');
+    }
+  }, []);
 
   // Add new knowledge asset to state
   const handleAddKnowledgeAsset = (newAsset: Omit<KnowledgeAsset, 'id' | 'lastUpdated'>) => {
@@ -142,6 +172,11 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (authStatus !== 'authenticated') return;
+    void refreshKnowledgeAssets();
+  }, [authStatus, refreshKnowledgeAssets]);
+
   const handleSignIn = async (username: string, password: string) => {
     setIsSigningIn(true);
     setAuthError(null);
@@ -168,6 +203,8 @@ export default function App() {
       setAuthUser(null);
       setAuthError(null);
       setAuthStatus('unauthenticated');
+      setKnowledgeAssets([]);
+      setKnowledgeCloudStatus('idle');
       setIsMobileMenuOpen(false);
     } catch (error) {
       const message = error instanceof Error ? error.message : '退出登录失败。';
@@ -372,6 +409,9 @@ export default function App() {
                 onAddAsset={handleAddKnowledgeAsset}
                 onUpdateAsset={handleUpdateKnowledgeAsset}
                 onImportAssets={handleImportKnowledgeAssets}
+                currentUser={authUser}
+                isOffline={knowledgeCloudStatus === 'offline'}
+                onRefreshAssets={refreshKnowledgeAssets}
                 isAppSidebarCollapsed={isSidebarCollapsed}
               />
             )}

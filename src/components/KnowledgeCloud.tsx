@@ -23,12 +23,16 @@ import {
 } from '../lib/knowledgeImportExport';
 import { getKnowledgePreviewText } from '../lib/knowledgePreview';
 import { DEFAULT_MARKDOWN_EDITOR_MODE, getMarkdownEditorModeValue, type MarkdownEditorMode } from '../lib/markdownEditorModes';
+import type { AuthUser } from '../lib/authApi';
 
 interface KnowledgeCloudProps {
   assets: KnowledgeAsset[];
   onAddAsset: (newAsset: Omit<KnowledgeAsset, 'id' | 'lastUpdated'>) => void;
   onUpdateAsset: (asset: KnowledgeAsset) => void;
   onImportAssets?: (newAssets: Array<Omit<KnowledgeAsset, 'id' | 'lastUpdated'>>) => void;
+  currentUser: AuthUser;
+  isOffline: boolean;
+  onRefreshAssets: () => Promise<void>;
   isAppSidebarCollapsed?: boolean;
 }
 
@@ -595,7 +599,16 @@ function RichKnowledgeEditor({ id, value, placeholder, minHeight = 'min-h-[92px]
   );
 }
 
-export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onImportAssets, isAppSidebarCollapsed = false }: KnowledgeCloudProps) {
+export default function KnowledgeCloud({
+  assets,
+  onAddAsset,
+  onUpdateAsset,
+  onImportAssets,
+  currentUser,
+  isOffline,
+  onRefreshAssets,
+  isAppSidebarCollapsed = false,
+}: KnowledgeCloudProps) {
   const [activeCategory, setActiveCategory] = useState<KnowledgeTableType | 'all'>('all');
   const [activeDirectoryPath, setActiveDirectoryPath] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -623,6 +636,8 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
   const [renderLimit, setRenderLimit] = useState(GRID_BATCH_SIZE);
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const canEdit = !isOffline && (currentUser.role === 'editor' || currentUser.role === 'admin');
+  const canAdmin = !isOffline && currentUser.role === 'admin';
 
   // New Asset Form State
   const [newTitle, setNewTitle] = useState('');
@@ -654,11 +669,19 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
   };
 
   const openCreateAssetDrawer = () => {
+    if (!canEdit) {
+      showToast(isOffline ? '离线缓存模式下暂不能新增知识卡片' : '当前账号没有编辑权限');
+      return;
+    }
     resetKnowledgeForm();
     setIsModalOpen(true);
   };
 
   const openEditAssetDrawer = (asset: KnowledgeAsset) => {
+    if (!canEdit) {
+      showToast(isOffline ? '离线缓存模式下暂不能编辑知识卡片' : '当前账号没有编辑权限');
+      return;
+    }
     const schema = getKnowledgeFieldSchema(asset.category);
     const nextFields = createInitialKnowledgeFields(asset.category);
     for (const field of schema.fields) {
@@ -683,6 +706,10 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
   // Handle Form Submission
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) {
+      showToast(isOffline ? '离线缓存模式下暂不能保存知识卡片' : '当前账号没有编辑权限');
+      return;
+    }
     const validation = validateKnowledgeAssetDraft({
       category: newCategory,
       title: newTitle,
@@ -831,6 +858,10 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
+    if (!canAdmin) {
+      showToast(isOffline ? '离线缓存模式下暂不能导入知识卡片' : '当前账号没有批量导入权限');
+      return;
+    }
     if (!onImportAssets) {
       showToast('当前页面未接入批量导入能力');
       return;
@@ -862,6 +893,10 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
   };
 
   const toggleEditMode = () => {
+    if (!canEdit) {
+      showToast(isOffline ? '离线缓存模式下暂不能进入编辑模式' : '当前账号没有编辑权限');
+      return;
+    }
     setIsEditMode(prev => {
       const next = !prev;
       if (!next) {
@@ -892,6 +927,10 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
   };
 
   const openBulkEditDrawer = () => {
+    if (!canAdmin) {
+      showToast(isOffline ? '离线缓存模式下暂不能批量编辑' : '当前账号没有批量编辑权限');
+      return;
+    }
     if (selectedAssetIds.length === 0) {
       showToast('请先选择要批量编辑的知识卡片');
       return;
@@ -906,6 +945,10 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
 
   const applyBulkEdit = (event: React.FormEvent) => {
     event.preventDefault();
+    if (!canAdmin) {
+      showToast(isOffline ? '离线缓存模式下暂不能批量编辑' : '当前账号没有批量编辑权限');
+      return;
+    }
     if (selectedAssets.length === 0) {
       showToast('请先选择要批量编辑的知识卡片');
       return;
@@ -1355,12 +1398,16 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
               <button
                 type="button"
                 onClick={toggleEditMode}
-                className={`flex items-center justify-center gap-1.5 px-3 py-2.5 font-extrabold text-xs rounded-xl transition shadow-sm cursor-pointer shrink-0 ${
-                  isEditMode
+                disabled={!canEdit}
+                className={`flex items-center justify-center gap-1.5 px-3 py-2.5 font-extrabold text-xs rounded-xl transition shadow-sm shrink-0 ${
+                  !canEdit
+                    ? 'bg-slate-100 border border-[#E2E4E9] text-slate-300 cursor-not-allowed'
+                    : isEditMode
                     ? 'bg-[#0D0B3D] text-white hover:bg-[#181548]'
-                    : 'bg-white border border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE]'
+                    : 'bg-white border border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] cursor-pointer'
                 }`}
                 id="knowledge-edit-mode-btn"
+                title={!canEdit ? (isOffline ? '离线缓存模式下不可编辑' : '当前账号没有编辑权限') : undefined}
               >
                 <Pencil className="w-4 h-4" />
                 <span>{isEditMode ? '退出编辑' : '编辑模式'}</span>
@@ -1377,9 +1424,14 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
               <button
                 type="button"
                 onClick={() => importInputRef.current?.click()}
-                className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-white border border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] font-extrabold text-xs rounded-xl transition shadow-sm cursor-pointer shrink-0"
+                disabled={!canAdmin}
+                className={`flex items-center justify-center gap-1.5 px-3 py-2.5 border font-extrabold text-xs rounded-xl transition shadow-sm shrink-0 ${
+                  canAdmin
+                    ? 'bg-white border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] cursor-pointer'
+                    : 'bg-slate-100 border-[#E2E4E9] text-slate-300 cursor-not-allowed'
+                }`}
                 id="knowledge-import-btn"
-                title="按知识云字段模板导入 Excel"
+                title={canAdmin ? '按知识云字段模板导入 Excel' : '仅管理员可导入'}
               >
                 <Upload className="w-4 h-4" />
                 <span>导入</span>
@@ -1397,11 +1449,29 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
 
               <button
                 onClick={openCreateAssetDrawer}
-                className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-[#5F52EE] hover:bg-[#4E41DC] text-white font-extrabold text-xs rounded-xl transition shadow-md shadow-primary/10 cursor-pointer shrink-0"
+                disabled={!canEdit}
+                className={`flex items-center justify-center gap-1.5 px-4 py-2.5 font-extrabold text-xs rounded-xl transition shadow-md shadow-primary/10 shrink-0 ${
+                  canEdit
+                    ? 'bg-[#5F52EE] hover:bg-[#4E41DC] text-white cursor-pointer'
+                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                }`}
                 id="add-knowledge-btn"
+                title={canEdit ? '创建知识卡片' : '当前不可创建知识卡片'}
               >
                 <Plus className="w-4 h-4" />
                 <span>Create Library</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  void onRefreshAssets();
+                }}
+                className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-white border border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] font-extrabold text-xs rounded-xl transition shadow-sm cursor-pointer shrink-0"
+                title="重新同步知识云"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>同步</span>
               </button>
 
               {viewMode === 'grid' && (
@@ -1522,9 +1592,10 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
                 <button
                   type="button"
                   onClick={openBulkEditDrawer}
-                  disabled={selectedAssetIds.length === 0}
+                  disabled={!canAdmin || selectedAssetIds.length === 0}
                   className="flex items-center justify-center gap-1.5 px-3 py-2 bg-[#5F52EE] hover:bg-[#4E41DC] disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none text-white font-extrabold text-xs rounded-xl transition shadow-md shadow-primary/10 cursor-pointer disabled:cursor-not-allowed shrink-0"
                   id="bulk-edit-knowledge-btn"
+                  title={canAdmin ? undefined : '仅管理员可批量编辑'}
                 >
                   <Layers className="w-4 h-4" />
                   <span>批量编辑 ({selectedAssetIds.length})</span>
@@ -1627,7 +1698,10 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
                             e.stopPropagation();
                             openEditAssetDrawer(asset);
                           }}
-                          className="flex items-center gap-1 px-3 py-1 bg-white hover:bg-white/95 text-[#5F52EE] font-black text-[10px] rounded-lg shadow-sm transition active:scale-95 cursor-pointer"
+                          disabled={!canEdit}
+                          className={`flex items-center gap-1 px-3 py-1 bg-white font-black text-[10px] rounded-lg shadow-sm transition active:scale-95 ${
+                            canEdit ? 'hover:bg-white/95 text-[#5F52EE] cursor-pointer' : 'text-slate-300 cursor-not-allowed'
+                          }`}
                         >
                           <Pencil className="w-3 h-3" />
                           <span>Modify</span>
@@ -1857,8 +1931,13 @@ export default function KnowledgeCloud({ assets, onAddAsset, onUpdateAsset, onIm
                   <button
                     type="button"
                     onClick={() => openEditAssetDrawer(selectedAsset)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#5F52EE] text-white hover:bg-[#4E41DC] transition cursor-pointer text-[11px] font-black shadow-sm"
-                    title="编辑该知识卡片"
+                    disabled={!canEdit}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition text-[11px] font-black shadow-sm ${
+                      canEdit
+                        ? 'bg-[#5F52EE] text-white hover:bg-[#4E41DC] cursor-pointer'
+                        : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                    }`}
+                    title={canEdit ? '编辑该知识卡片' : '当前不可编辑知识卡片'}
                     id="edit-selected-knowledge-btn"
                   >
                     <Pencil className="w-3.5 h-3.5" />
