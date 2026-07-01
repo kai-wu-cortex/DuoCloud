@@ -886,29 +886,36 @@ export default function KnowledgeCloud({
       return;
     }
 
+    let importedAssets: Array<Omit<KnowledgeAsset, 'id' | 'lastUpdated'>>;
     try {
-      const { importedAssets } = await parseKnowledgeImportWorkbook(file);
+      ({ importedAssets } = await parseKnowledgeImportWorkbook(file));
       if (importedAssets.length === 0) {
         showToast('未识别到可导入的知识云字段，请检查模板工作表和表头', 3600);
         return;
       }
+    } catch (error) {
+      console.error('Failed to parse knowledge workbook', error);
+      showToast('导入失败：请确认文件为知识云字段模板 Excel', 3600);
+      return;
+    }
+
+    try {
       const result = await onImportAssets(importedAssets);
       showToast(`导入完成：新增 ${result.created}，更新 ${result.updated}，跳过 ${result.skipped}，失败 ${result.failed}`, 3600);
     } catch (error) {
-      console.error('Failed to import knowledge workbook', error);
-      showToast('导入失败：请确认文件为知识云字段模板 Excel', 3600);
+      console.error('Failed to import knowledge assets', error);
+      showToast(error instanceof Error ? error.message : '导入失败：知识云同步服务暂不可用', 3600);
     }
   };
 
   const handleExportWorkbook = async () => {
     try {
       const remoteAssets = await onExportAssets();
-      const exportAssets = remoteAssets.length > 0 ? remoteAssets : filteredAssets.length > 0 ? filteredAssets : assets;
-      await exportKnowledgeAssetsWorkbook(exportAssets);
-      showToast(`已导出 ${exportAssets.length} 张知识卡片`);
+      await exportKnowledgeAssetsWorkbook(remoteAssets);
+      showToast(`已导出 ${remoteAssets.length} 张知识卡片`);
     } catch (error) {
       console.error('Failed to export knowledge workbook', error);
-      showToast('导出失败：请稍后重试');
+      showToast(error instanceof Error ? error.message : '导出失败：请稍后重试');
     }
   };
 
