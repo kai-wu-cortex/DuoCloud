@@ -4,7 +4,7 @@ import {
   getSessionSecret,
   requireSession,
   sendJson,
-} from './sessionAuth';
+} from './sessionAuth.ts';
 
 export async function authMeApiHandler(
   req: Pick<Request, 'method' | 'headers'>,

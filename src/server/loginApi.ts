@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { Request, Response } from 'express';
 import type { Document } from 'mongodb';
-import { getMongoCollection } from '../lib/mongodb';
+import { getMongoCollection } from '../lib/mongodb.ts';
 import {
   SessionAuthError,
   createSessionToken,
@@ -10,7 +10,7 @@ import {
   setSessionCookie,
   type SessionUser,
   type UserRole,
-} from './sessionAuth';
+} from './sessionAuth.ts';
 
 export interface SystemUserDoc extends Document {
   _id: string;

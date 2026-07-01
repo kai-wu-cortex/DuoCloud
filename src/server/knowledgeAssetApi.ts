@@ -1,15 +1,15 @@
 import type { Request, Response } from 'express';
 import type { Collection, Document, Filter, OptionalId, ReplaceOptions } from 'mongodb';
-import { KNOWLEDGE_FIELD_SCHEMAS } from '../lib/knowledgeFieldSchemas';
-import { getMongoCollection } from '../lib/mongodb';
-import type { KnowledgeAsset, KnowledgeTableType } from '../types';
+import { KNOWLEDGE_FIELD_SCHEMAS } from '../lib/knowledgeFieldSchemas.ts';
+import { getMongoCollection } from '../lib/mongodb.ts';
+import type { KnowledgeAsset, KnowledgeTableType } from '../types.ts';
 import {
   SessionAuthError,
   getSessionSecret,
   requireRole,
   requireSession,
   type SessionUser,
-} from './sessionAuth';
+} from './sessionAuth.ts';
 
 const KNOWLEDGE_COLLECTION = 'knowledge_assets';
 const REVISION_COLLECTION = 'knowledge_asset_revisions';

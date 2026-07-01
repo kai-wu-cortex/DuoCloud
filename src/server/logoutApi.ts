@@ -3,7 +3,7 @@ import {
   SessionAuthError,
   clearSessionCookie,
   sendJson,
-} from './sessionAuth';
+} from './sessionAuth.ts';
 
 export async function logoutApiHandler(
   req: Pick<Request, 'method'>,
