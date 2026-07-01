@@ -1392,8 +1392,8 @@ export default function KnowledgeCloud({
       {/* Main content column on the right */}
       <div className="flex-1 flex flex-col gap-5 overflow-hidden lg:pl-[17.5rem]">
         <div className="flex flex-col gap-3 pb-2 shrink-0">
-          <div className="grid grid-cols-1 xl:grid-cols-[minmax(220px,1fr)_minmax(360px,520px)_auto] items-center gap-3">
-            <h1 className="text-xl md:text-2xl font-black text-[#0D0B3D] tracking-tight flex flex-wrap items-baseline gap-x-2 gap-y-1 min-w-0">
+          <div className="flex flex-col 2xl:flex-row 2xl:items-start gap-3">
+            <h1 className="text-xl md:text-2xl font-black text-[#0D0B3D] tracking-tight flex flex-wrap items-baseline gap-x-2 gap-y-1 min-w-0 2xl:flex-1">
               <span>{categoryTitle}</span>
               {activeDirectoryLabel && <span className="text-[#5F52EE] text-sm font-black">/ {activeDirectoryLabel}</span>}
               <span className="text-slate-400 font-semibold text-xs md:text-sm">({filteredAssets.length})</span>
@@ -1404,131 +1404,135 @@ export default function KnowledgeCloud({
               )}
             </h1>
 
-            <div className="relative bg-white border border-[#E2E4E9] rounded-xl px-4 py-2.5 flex items-center gap-2 shadow-sm focus-within:border-slate-300 transition min-w-0">
-              <Search className="w-4 h-4 text-slate-400 shrink-0" />
-              <input 
-                type="text" 
-                placeholder="Search for Library..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-transparent text-xs font-bold text-[#0D0B3D] border-none outline-none w-full placeholder-slate-400/80"
-                id="knowledge-search-input"
-              />
-              {searchQuery && (
-                <button onClick={() => setSearchQuery('')} className="text-slate-400 hover:text-slate-600 cursor-pointer">
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
+            <div className="flex flex-col gap-2 w-full 2xl:w-auto 2xl:items-end">
+              <div className="flex flex-col md:flex-row md:items-center gap-2 w-full 2xl:w-auto">
+                <div className="relative bg-white border border-[#E2E4E9] rounded-xl px-4 py-2.5 flex items-center gap-2 shadow-sm focus-within:border-slate-300 transition min-w-0 w-full md:min-w-[20rem] 2xl:w-[32rem]">
+                  <Search className="w-4 h-4 text-slate-400 shrink-0" />
+                  <input
+                    type="text"
+                    placeholder="Search for Library..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="bg-transparent text-xs font-bold text-[#0D0B3D] border-none outline-none w-full placeholder-slate-400/80"
+                    id="knowledge-search-input"
+                  />
+                  {searchQuery && (
+                    <button onClick={() => setSearchQuery('')} className="text-slate-400 hover:text-slate-600 cursor-pointer">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
 
-            <div className="flex items-center justify-start xl:justify-end gap-2">
-              <div className="flex items-center border border-[#E2E4E9] rounded-xl bg-white p-1 shadow-sm shrink-0">
-                <button
-                  onClick={() => setViewMode('grid')}
-                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                    viewMode === 'grid' 
-                      ? 'bg-[#0D0B3D] text-white shadow-sm' 
-                      : 'text-slate-400 hover:text-slate-600'
-                  }`}
-                  title="Grid View"
-                >
-                  <LayoutGrid className="w-4.5 h-4.5" />
-                </button>
-                <button
-                  onClick={() => setViewMode('list')}
-                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                    viewMode === 'list' 
-                      ? 'bg-[#0D0B3D] text-white shadow-sm' 
-                      : 'text-slate-400 hover:text-slate-600'
-                  }`}
-                  title="List View"
-                >
-                  <ListIcon className="w-4.5 h-4.5" />
-                </button>
+                <div className="flex flex-wrap items-center justify-start md:justify-end gap-2 min-w-0">
+                  <div className="flex items-center border border-[#E2E4E9] rounded-xl bg-white p-1 shadow-sm shrink-0">
+                    <button
+                      onClick={() => setViewMode('grid')}
+                      className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                        viewMode === 'grid'
+                          ? 'bg-[#0D0B3D] text-white shadow-sm'
+                          : 'text-slate-400 hover:text-slate-600'
+                      }`}
+                      title="Grid View"
+                    >
+                      <LayoutGrid className="w-4.5 h-4.5" />
+                    </button>
+                    <button
+                      onClick={() => setViewMode('list')}
+                      className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                        viewMode === 'list'
+                          ? 'bg-[#0D0B3D] text-white shadow-sm'
+                          : 'text-slate-400 hover:text-slate-600'
+                      }`}
+                      title="List View"
+                    >
+                      <ListIcon className="w-4.5 h-4.5" />
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={toggleEditMode}
+                    disabled={!canEdit}
+                    className={`flex items-center justify-center gap-1.5 px-3 py-2.5 font-extrabold text-xs rounded-xl transition shadow-sm shrink-0 ${
+                      !canEdit
+                        ? 'bg-slate-100 border border-[#E2E4E9] text-slate-300 cursor-not-allowed'
+                        : isEditMode
+                        ? 'bg-[#0D0B3D] text-white hover:bg-[#181548]'
+                        : 'bg-white border border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] cursor-pointer'
+                    }`}
+                    id="knowledge-edit-mode-btn"
+                    title={!canEdit ? (isOffline ? '离线缓存模式下不可编辑' : '当前账号没有编辑权限') : undefined}
+                  >
+                    <Pencil className="w-4 h-4" />
+                    <span>{isEditMode ? '退出编辑' : '编辑模式'}</span>
+                  </button>
+
+                  <input
+                    ref={importInputRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    onChange={handleImportWorkbook}
+                    className="hidden"
+                    aria-label="导入知识云 Excel 模板"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => importInputRef.current?.click()}
+                    disabled={!canAdmin}
+                    className={`flex items-center justify-center gap-1.5 px-3 py-2.5 border font-extrabold text-xs rounded-xl transition shadow-sm shrink-0 ${
+                      canAdmin
+                        ? 'bg-white border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] cursor-pointer'
+                        : 'bg-slate-100 border-[#E2E4E9] text-slate-300 cursor-not-allowed'
+                    }`}
+                    id="knowledge-import-btn"
+                    title={canAdmin ? '按知识云字段模板导入 Excel' : '仅管理员可导入'}
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>导入</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExportWorkbook}
+                    className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-white border border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] font-extrabold text-xs rounded-xl transition shadow-sm cursor-pointer shrink-0"
+                    id="knowledge-export-btn"
+                    title="导出当前筛选结果为知识云字段模板 Excel"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>导出</span>
+                  </button>
+
+                  <button
+                    onClick={openCreateAssetDrawer}
+                    disabled={!canEdit}
+                    className={`flex items-center justify-center gap-1.5 px-4 py-2.5 font-extrabold text-xs rounded-xl transition shadow-md shadow-primary/10 shrink-0 ${
+                      canEdit
+                        ? 'bg-[#5F52EE] hover:bg-[#4E41DC] text-white cursor-pointer'
+                        : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                    }`}
+                    id="add-knowledge-btn"
+                    title={canEdit ? '创建知识卡片' : '当前不可创建知识卡片'}
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Create Library</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void onRefreshAssets();
+                    }}
+                    className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-white border border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] font-extrabold text-xs rounded-xl transition shadow-sm cursor-pointer shrink-0"
+                    title="重新同步知识云"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span>同步</span>
+                  </button>
+                </div>
               </div>
 
-              <button
-                type="button"
-                onClick={toggleEditMode}
-                disabled={!canEdit}
-                className={`flex items-center justify-center gap-1.5 px-3 py-2.5 font-extrabold text-xs rounded-xl transition shadow-sm shrink-0 ${
-                  !canEdit
-                    ? 'bg-slate-100 border border-[#E2E4E9] text-slate-300 cursor-not-allowed'
-                    : isEditMode
-                    ? 'bg-[#0D0B3D] text-white hover:bg-[#181548]'
-                    : 'bg-white border border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] cursor-pointer'
-                }`}
-                id="knowledge-edit-mode-btn"
-                title={!canEdit ? (isOffline ? '离线缓存模式下不可编辑' : '当前账号没有编辑权限') : undefined}
-              >
-                <Pencil className="w-4 h-4" />
-                <span>{isEditMode ? '退出编辑' : '编辑模式'}</span>
-              </button>
-
-              <input
-                ref={importInputRef}
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                onChange={handleImportWorkbook}
-                className="hidden"
-                aria-label="导入知识云 Excel 模板"
-              />
-              <button
-                type="button"
-                onClick={() => importInputRef.current?.click()}
-                disabled={!canAdmin}
-                className={`flex items-center justify-center gap-1.5 px-3 py-2.5 border font-extrabold text-xs rounded-xl transition shadow-sm shrink-0 ${
-                  canAdmin
-                    ? 'bg-white border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] cursor-pointer'
-                    : 'bg-slate-100 border-[#E2E4E9] text-slate-300 cursor-not-allowed'
-                }`}
-                id="knowledge-import-btn"
-                title={canAdmin ? '按知识云字段模板导入 Excel' : '仅管理员可导入'}
-              >
-                <Upload className="w-4 h-4" />
-                <span>导入</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleExportWorkbook}
-                className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-white border border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] font-extrabold text-xs rounded-xl transition shadow-sm cursor-pointer shrink-0"
-                id="knowledge-export-btn"
-                title="导出当前筛选结果为知识云字段模板 Excel"
-              >
-                <Download className="w-4 h-4" />
-                <span>导出</span>
-              </button>
-
-              <button
-                onClick={openCreateAssetDrawer}
-                disabled={!canEdit}
-                className={`flex items-center justify-center gap-1.5 px-4 py-2.5 font-extrabold text-xs rounded-xl transition shadow-md shadow-primary/10 shrink-0 ${
-                  canEdit
-                    ? 'bg-[#5F52EE] hover:bg-[#4E41DC] text-white cursor-pointer'
-                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                }`}
-                id="add-knowledge-btn"
-                title={canEdit ? '创建知识卡片' : '当前不可创建知识卡片'}
-              >
-                <Plus className="w-4 h-4" />
-                <span>Create Library</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  void onRefreshAssets();
-                }}
-                className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-white border border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] font-extrabold text-xs rounded-xl transition shadow-sm cursor-pointer shrink-0"
-                title="重新同步知识云"
-              >
-                <RotateCcw className="w-4 h-4" />
-                <span>同步</span>
-              </button>
-
               {viewMode === 'grid' && (
-                <div className="hidden md:flex items-center gap-2 bg-white border border-[#E2E4E9] rounded-xl p-1 shadow-sm shrink-0">
-                  <div className="flex items-center gap-1 border-r border-[#E2E4E9] pr-2">
+                <div className="hidden md:flex items-center gap-2 bg-white border border-[#E2E4E9] rounded-xl p-1 shadow-sm self-start 2xl:self-end max-w-full overflow-x-auto">
+                  <div className="flex items-center gap-1 border-r border-[#E2E4E9] pr-2 shrink-0">
                     <span className="px-1.5 text-[10px] font-black text-slate-400 uppercase tracking-wider">每行</span>
                     {[3, 4, 5].map(count => (
                       <button
@@ -1544,7 +1548,7 @@ export default function KnowledgeCloud({
                       </button>
                     ))}
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 shrink-0">
                     {[
                       { id: 'regular', label: '常规' },
                       { id: 'wide', label: '宽' },
