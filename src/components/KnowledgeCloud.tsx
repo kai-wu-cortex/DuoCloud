@@ -24,7 +24,7 @@ import {
 import { getKnowledgePreviewText } from '../lib/knowledgePreview';
 import { DEFAULT_MARKDOWN_EDITOR_MODE, getMarkdownEditorModeValue, type MarkdownEditorMode } from '../lib/markdownEditorModes';
 import type { AuthUser } from '../lib/authApi';
-import type { KnowledgeApiBulkResult } from '../lib/knowledgeApi';
+import { uploadKnowledgeAttachment, type KnowledgeApiBulkResult, type KnowledgeAttachmentUploadResult } from '../lib/knowledgeApi';
 
 interface KnowledgeCloudProps {
   assets: KnowledgeAsset[];
@@ -262,19 +262,40 @@ interface RichKnowledgeEditorProps {
   placeholder?: string;
   minHeight?: string;
   onChange: (value: string) => void;
+  uploadContext?: {
+    assetId?: string;
+    fieldName?: string;
+  };
+  onUploadAttachment?: (
+    file: File,
+    context: { assetId?: string; fieldName?: string; kind: 'image' | 'file' },
+  ) => Promise<KnowledgeAttachmentUploadResult>;
+  onUploadError?: (message: string) => void;
 }
 
-function RichKnowledgeEditor({ id, value, placeholder, minHeight = 'min-h-[92px]', onChange }: RichKnowledgeEditorProps) {
+function RichKnowledgeEditor({
+  id,
+  value,
+  placeholder,
+  minHeight = 'min-h-[92px]',
+  onChange,
+  uploadContext,
+  onUploadAttachment,
+  onUploadError,
+}: RichKnowledgeEditorProps) {
   const editorRef = useRef<HTMLDivElement | null>(null);
   const fullscreenEditorRef = useRef<HTMLDivElement | null>(null);
   const previewEditorRef = useRef<HTMLDivElement | null>(null);
   const fullscreenPreviewEditorRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fullscreenTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const isComposingRef = useRef(false);
   const [editorMode, setEditorMode] = useState<MarkdownEditorMode>(DEFAULT_MARKDOWN_EDITOR_MODE);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
+  const [uploadingKind, setUploadingKind] = useState<'image' | 'file' | null>(null);
   const draftKey = `duocloud:knowledge-editor-draft:${id}`;
   const hasRichMarkup = (html: string) => /<(b|strong|i|em|u|a|img|ul|ol|li|table|thead|tbody|tr|th|td|h[1-6]|pre|code|blockquote)\b/i.test(html);
   const hasMarkdownSyntax = (text: string) => /(^|\n)\s{0,3}(#{1,6}\s+|[-*+]\s+|\d+\.\s+|>\s+|```|\|.+\|)|!\[[^\]]*]\([^)]+\)|\[[^\]]+]\([^)]+\)|\*\*[^*]+\*\*|__[^_]+__|`[^`]+`/.test(text);
@@ -338,6 +359,23 @@ function RichKnowledgeEditor({ id, value, placeholder, minHeight = 'min-h-[92px]
     });
   };
 
+  const insertMarkdownAtCursor = (snippet: string) => {
+    const textarea = getActiveTextarea();
+    if (!textarea) {
+      onChange(`${value}${value ? '\n' : ''}${snippet}`);
+      return;
+    }
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const nextValue = `${value.slice(0, start)}${snippet}${value.slice(end)}`;
+    onChange(nextValue);
+    window.requestAnimationFrame(() => {
+      textarea.focus();
+      const nextCursor = start + snippet.length;
+      textarea.setSelectionRange(nextCursor, nextCursor);
+    });
+  };
+
   const applyCommand = (command: string, commandValue?: string) => {
     if (editorMode === 'code') {
       if (command === 'bold') applyMarkdownWrap('**');
@@ -351,6 +389,35 @@ function RichKnowledgeEditor({ id, value, placeholder, minHeight = 'min-h-[92px]
     syncFromEditor();
   };
 
+  const escapeHtml = (text: string) => text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+  const insertAttachmentMarkup = (
+    upload: KnowledgeAttachmentUploadResult,
+    kind: 'image' | 'file',
+  ) => {
+    const label = upload.fileName || (kind === 'image' ? '图片' : '附件');
+    if (editorMode === 'code') {
+      const markdown = kind === 'image'
+        ? `![${label}](${upload.url})`
+        : `[${label}](${upload.url})`;
+      insertMarkdownAtCursor(markdown);
+      return;
+    }
+
+    const safeLabel = escapeHtml(label);
+    const safeUrl = escapeHtml(upload.url);
+    const html = kind === 'image'
+      ? `<img src="${safeUrl}" alt="${safeLabel}" />`
+      : `<a href="${safeUrl}" target="_blank" rel="noreferrer">${safeLabel}</a>`;
+    document.execCommand('insertHTML', false, html);
+    syncFromEditor();
+  };
+
   const insertLink = () => {
     const url = window.prompt('输入链接 URL');
     if (!url) return;
@@ -358,9 +425,36 @@ function RichKnowledgeEditor({ id, value, placeholder, minHeight = 'min-h-[92px]
   };
 
   const insertImage = () => {
+    if (onUploadAttachment) {
+      imageInputRef.current?.click();
+      return;
+    }
     const url = window.prompt('输入图片 URL');
     if (!url) return;
     applyCommand('insertImage', url);
+  };
+
+  const handleAttachmentUpload = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+    kind: 'image' | 'file',
+  ) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !onUploadAttachment || uploadingKind) return;
+
+    setUploadingKind(kind);
+    try {
+      const upload = await onUploadAttachment(file, {
+        assetId: uploadContext?.assetId,
+        fieldName: uploadContext?.fieldName ?? id,
+        kind,
+      });
+      insertAttachmentMarkup(upload, kind === 'image' || upload.contentType.startsWith('image/') ? 'image' : 'file');
+    } catch (error) {
+      onUploadError?.(error instanceof Error ? error.message : '附件上传失败');
+    } finally {
+      setUploadingKind(null);
+    }
   };
 
   const applyMarkdown = () => {
@@ -446,8 +540,11 @@ function RichKnowledgeEditor({ id, value, placeholder, minHeight = 'min-h-[92px]
         <button type="button" title="插入链接" onClick={insertLink} className="w-8 h-8 inline-flex items-center justify-center rounded-lg text-slate-600 hover:bg-white hover:text-primary transition cursor-pointer">
           <Link className="w-4 h-4" />
         </button>
-        <button type="button" title="插入图片 URL" onClick={insertImage} className="w-8 h-8 inline-flex items-center justify-center rounded-lg text-slate-600 hover:bg-white hover:text-primary transition cursor-pointer">
-          <ImageIcon className="w-4 h-4" />
+        <button type="button" title={onUploadAttachment ? '上传并插入图片' : '插入图片 URL'} onClick={insertImage} disabled={uploadingKind !== null} className="w-8 h-8 inline-flex items-center justify-center rounded-lg text-slate-600 hover:bg-white hover:text-primary transition cursor-pointer disabled:opacity-45 disabled:cursor-wait">
+          <ImageIcon className={`w-4 h-4 ${uploadingKind === 'image' ? 'animate-pulse' : ''}`} />
+        </button>
+        <button type="button" title="上传并插入附件" onClick={() => attachmentInputRef.current?.click()} disabled={!onUploadAttachment || uploadingKind !== null} className="w-8 h-8 inline-flex items-center justify-center rounded-lg text-slate-600 hover:bg-white hover:text-primary transition cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed">
+          <Paperclip className={`w-4 h-4 ${uploadingKind === 'file' ? 'animate-pulse' : ''}`} />
         </button>
         <span className="h-5 w-px bg-outline-variant/70 mx-1 shrink-0" />
         <button type="button" title="应用 Markdown" onClick={applyMarkdown} className="w-8 h-8 inline-flex items-center justify-center rounded-lg text-slate-600 hover:bg-white hover:text-primary transition cursor-pointer">
@@ -550,6 +647,21 @@ function RichKnowledgeEditor({ id, value, placeholder, minHeight = 'min-h-[92px]
 
   return (
     <>
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(event) => handleAttachmentUpload(event, 'image')}
+        aria-label="上传知识云图片"
+      />
+      <input
+        ref={attachmentInputRef}
+        type="file"
+        className="hidden"
+        onChange={(event) => handleAttachmentUpload(event, 'file')}
+        aria-label="上传知识云附件"
+      />
       <div className="min-w-0 bg-white border border-outline-variant rounded-xl shadow-sm overflow-hidden focus-within:border-primary/50">
         {renderToolbar()}
         {renderEditorBody(id, minHeight)}
@@ -873,6 +985,22 @@ export default function KnowledgeCloud({
   const showToast = (message: string, duration = 2400) => {
     setToastMsg(message);
     setTimeout(() => setToastMsg(null), duration);
+  };
+
+  const handleEditorAttachmentUpload = async (
+    file: File,
+    context: { assetId?: string; fieldName?: string; kind: 'image' | 'file' },
+  ) => {
+    if (!canEdit) {
+      throw new Error(isOffline ? '离线缓存模式下暂不能上传附件' : '当前账号没有编辑权限');
+    }
+    const result = await uploadKnowledgeAttachment({
+      file,
+      assetId: context.assetId,
+      fieldName: context.fieldName,
+    });
+    showToast(context.kind === 'image' ? '图片已上传并插入' : '附件已上传并插入');
+    return result;
   };
 
   const handleImportWorkbook = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1234,6 +1362,9 @@ export default function KnowledgeCloud({
                   placeholder={field.placeholder || `录入${field.label}`}
                   onChange={(nextValue) => handleDynamicChange(field.name, nextValue)}
                   minHeight={field.type === 'textarea' ? 'min-h-[112px]' : 'min-h-[76px]'}
+                  uploadContext={{ assetId: editingAsset?.id, fieldName: field.name }}
+                  onUploadAttachment={handleEditorAttachmentUpload}
+                  onUploadError={(message) => showToast(message, 3600)}
                 />
               )}
             </div>
@@ -2364,6 +2495,9 @@ export default function KnowledgeCloud({
                             placeholder={selectedField.placeholder || `批量修改${selectedField.label}`}
                             onChange={setBulkFieldValue}
                             minHeight={selectedField.type === 'textarea' ? 'min-h-[112px]' : 'min-h-[76px]'}
+                            uploadContext={{ assetId: 'bulk-edit', fieldName: selectedField.name }}
+                            onUploadAttachment={handleEditorAttachmentUpload}
+                            onUploadError={(message) => showToast(message, 3600)}
                           />
                         </div>
                       );
@@ -2397,6 +2531,9 @@ export default function KnowledgeCloud({
                       placeholder="支持 Markdown、图片、链接、URL..."
                       onChange={setBulkContent}
                       minHeight="min-h-[132px]"
+                      uploadContext={{ assetId: 'bulk-edit', fieldName: 'content' }}
+                      onUploadAttachment={handleEditorAttachmentUpload}
+                      onUploadError={(message) => showToast(message, 3600)}
                     />
                   </div>
                 </div>
@@ -2509,6 +2646,9 @@ export default function KnowledgeCloud({
                         value={newContent}
                         onChange={setNewContent}
                         minHeight="min-h-[132px]"
+                        uploadContext={{ assetId: editingAsset?.id, fieldName: 'content' }}
+                        onUploadAttachment={handleEditorAttachmentUpload}
+                        onUploadError={(message) => showToast(message, 3600)}
                       />
                     </div>
 

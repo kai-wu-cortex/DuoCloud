@@ -1,3 +1,4 @@
+import { upload } from '@vercel/blob/client';
 import type { KnowledgeAsset } from '../types';
 import { createKnowledgeAsset } from './appState';
 
@@ -12,6 +13,15 @@ export interface KnowledgeApiBulkResult {
 
 export interface KnowledgeBulkPatchPayload {
   assets: KnowledgeAsset[];
+}
+
+export interface KnowledgeAttachmentUploadResult {
+  url: string;
+  downloadUrl?: string;
+  pathname: string;
+  fileName: string;
+  contentType: string;
+  size: number;
 }
 
 interface KnowledgeApiResponse<T> {
@@ -191,6 +201,23 @@ export function parseBulkResult(payload: unknown): KnowledgeApiBulkResult {
 
 export const parseKnowledgeApiBulkResponse = parseBulkResult;
 
+function sanitizeKnowledgeAttachmentFileName(fileName: string): string {
+  return (fileName || 'knowledge-attachment')
+    .normalize('NFKC')
+    .replace(/[\\/:*?"<>|\u0000-\u001F]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim() || 'knowledge-attachment';
+}
+
+function sanitizeKnowledgeAttachmentPathSegment(value: string | undefined, fallback: string): string {
+  return (value || fallback)
+    .normalize('NFKC')
+    .replace(/[^A-Za-z0-9._-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80) || fallback;
+}
+
 export async function listKnowledgeAssets(): Promise<KnowledgeAsset[]> {
   const payload = await requestKnowledgeApi<unknown>('/api/knowledge-assets');
   return parseKnowledgeApiListResponse(payload);
@@ -261,4 +288,43 @@ export async function bulkPatchKnowledgeAssets(payload: KnowledgeBulkPatchPayloa
 export async function exportRemoteKnowledgeAssets(): Promise<KnowledgeAsset[]> {
   const payload = await requestKnowledgeApi<unknown>('/api/knowledge-assets/export');
   return parseKnowledgeApiListResponse(payload);
+}
+
+export async function uploadKnowledgeAttachment(input: {
+  file: File;
+  assetId?: string;
+  fieldName?: string;
+}): Promise<KnowledgeAttachmentUploadResult> {
+  const fileName = sanitizeKnowledgeAttachmentFileName(input.file.name);
+  const contentType = input.file.type || 'application/octet-stream';
+  const pathname = [
+    'knowledge-assets',
+    sanitizeKnowledgeAttachmentPathSegment(input.assetId, 'draft'),
+    sanitizeKnowledgeAttachmentPathSegment(input.fieldName, 'content'),
+    new Date().toISOString().slice(0, 10),
+    fileName,
+  ].join('/');
+
+  const blob = await upload(pathname, input.file, {
+    access: 'public',
+    handleUploadUrl: '/api/knowledge-assets/attachments',
+    contentType,
+    multipart: input.file.size > 8 * 1024 * 1024,
+    clientPayload: JSON.stringify({
+      fileName,
+      contentType,
+      size: input.file.size,
+      assetId: input.assetId,
+      fieldName: input.fieldName,
+    }),
+  });
+
+  return {
+    url: blob.url,
+    downloadUrl: blob.downloadUrl,
+    pathname: blob.pathname,
+    fileName,
+    contentType: blob.contentType || contentType,
+    size: input.file.size,
+  };
 }
