@@ -161,13 +161,23 @@ function isImageAttachmentUrl(value: string) {
 }
 
 function isOpenableAttachmentUrl(value: string) {
+  if (/^obsidian:/i.test(value)) return false;
+  if (/internal-api-drive-stream\.feishu\.cn/i.test(value)) return false;
   return /^(https?:\/\/|\/|data:image\/)/i.test(value);
+}
+
+function isDisplayableAttachmentLabel(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return false;
+  if (['obsidia', 'obsidian', 'undefined', 'null'].includes(normalized)) return false;
+  return true;
 }
 
 function collectKnowledgeAttachments(asset: KnowledgeAsset): KnowledgeAttachmentItem[] {
   const attachments: KnowledgeAttachmentItem[] = [];
   const seen = new Set<string>();
   const addAttachment = (item: Omit<KnowledgeAttachmentItem, 'id'>) => {
+    if (!isDisplayableAttachmentLabel(item.label)) return;
     const previewSrc = item.previewSrc && isOpenableAttachmentUrl(item.previewSrc) ? item.previewSrc : undefined;
     const href = item.href && (item.href.startsWith('/evidence/') || isOpenableAttachmentUrl(item.href)) ? item.href : undefined;
     if (!previewSrc && !href) return;
