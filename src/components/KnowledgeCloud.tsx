@@ -228,11 +228,12 @@ function collectKnowledgeAttachments(asset: KnowledgeAsset): KnowledgeAttachment
     while ((urlMatch = urlPattern.exec(value)) !== null) {
       const href = cleanAttachmentToken(urlMatch[0]);
       if (!href) continue;
+      if (!isImageAttachmentUrl(href)) continue;
       addAttachment({
-        type: isImageAttachmentUrl(href) ? 'image' : 'link',
+        type: 'image',
         label: getFileNameFromPath(href),
         href,
-        previewSrc: isImageAttachmentUrl(href) ? href : undefined,
+        previewSrc: href,
         meta: key === 'content' ? '详细描述链接' : `字段链接：${key}`,
       });
     }
