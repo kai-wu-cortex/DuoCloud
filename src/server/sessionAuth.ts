@@ -17,7 +17,8 @@ type ErrorCode =
   | 'UNAUTHORIZED'
   | 'FORBIDDEN'
   | 'METHOD_NOT_ALLOWED'
-  | 'MONGODB_API_ERROR';
+  | 'MONGODB_API_ERROR'
+  | 'SESSION_AUTH_ERROR';
 
 export class SessionAuthError extends Error {
   readonly statusCode: number;
@@ -68,7 +69,7 @@ function parseCookies(header: string | undefined): Record<string, string> {
 export function getSessionSecret(): string {
   const secret = process.env.SESSION_SECRET;
   if (!secret) {
-    throw new SessionAuthError(500, 'MONGODB_API_ERROR', 'MONGODB_API_ERROR: 服务暂时不可用。');
+    throw new SessionAuthError(500, 'SESSION_AUTH_ERROR', 'SESSION_AUTH_ERROR: 服务暂时不可用。');
   }
   return secret;
 }
@@ -134,7 +135,7 @@ export function createSessionCookie(token: string): string {
 }
 
 export function createExpiredSessionCookie(): string {
-  return `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+  return `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
 }
 
 export function setSessionCookie(res: Pick<Response, 'setHeader'>, token: string): void {

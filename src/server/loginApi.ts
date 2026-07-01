@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import type { Request, Response } from 'express';
 import type { Document } from 'mongodb';
 import { getMongoCollection } from '../lib/mongodb';
@@ -24,6 +24,12 @@ interface LoginRequestBody {
   username?: unknown;
   password?: unknown;
 }
+
+export interface SystemUsersCollection {
+  findOne(filter: Pick<SystemUserDoc, 'username'>): Promise<SystemUserDoc | null>;
+}
+
+let systemUsersCollectionResolver: (() => Promise<SystemUsersCollection>) | null = null;
 
 function parseBody(body: unknown): LoginRequestBody {
   if (typeof body === 'string') {
@@ -54,7 +60,24 @@ export function hashPassword(password: string, salt: string): string {
 }
 
 export function verifyPasswordHash(password: string, salt: string, passwordHash: string): boolean {
-  return hashPassword(password, salt) === passwordHash;
+  const calculatedHash = hashPassword(password, salt);
+  const expectedHash = Buffer.from(passwordHash, 'utf8');
+  const actualHash = Buffer.from(calculatedHash, 'utf8');
+  if (expectedHash.length !== actualHash.length) return false;
+  return timingSafeEqual(actualHash, expectedHash);
+}
+
+async function getSystemUsersCollection(): Promise<SystemUsersCollection> {
+  if (systemUsersCollectionResolver) {
+    return systemUsersCollectionResolver();
+  }
+  return await getMongoCollection<SystemUserDoc>('system_users');
+}
+
+export function setSystemUsersCollectionResolverForTests(
+  resolver: (() => Promise<SystemUsersCollection>) | null,
+): void {
+  systemUsersCollectionResolver = resolver;
 }
 
 export async function loginApiHandler(
@@ -72,7 +95,7 @@ export async function loginApiHandler(
     throw new SessionAuthError(401, 'UNAUTHORIZED', 'UNAUTHORIZED: 用户名或密码错误。');
   }
 
-  const collection = await getMongoCollection<SystemUserDoc>('system_users');
+  const collection = await getSystemUsersCollection();
   const user = await collection.findOne({ username });
   if (!user || !verifyPasswordHash(password, user.salt, user.passwordHash)) {
     throw new SessionAuthError(401, 'UNAUTHORIZED', 'UNAUTHORIZED: 用户名或密码错误。');

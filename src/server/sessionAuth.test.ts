@@ -7,7 +7,14 @@ import {
   createExpiredSessionCookie,
   requireRole,
   SessionAuthError,
+  getSessionSecret,
 } from './sessionAuth';
+
+const ORIGINAL_ENV = { ...process.env };
+
+test.afterEach(() => {
+  process.env = { ...ORIGINAL_ENV };
+});
 
 test('session token verifies before expiration', () => {
   const now = new Date('2026-07-01T00:00:00.000Z');
@@ -38,6 +45,7 @@ test('session cookies use HttpOnly secure same-site attributes', () => {
   assert.match(cookie, /Secure/);
   assert.match(cookie, /SameSite=Lax/);
   assert.match(createExpiredSessionCookie(), /Max-Age=0/);
+  assert.match(createExpiredSessionCookie(), /Expires=Thu, 01 Jan 1970 00:00:00 GMT/);
 });
 
 test('requireRole throws forbidden when role is insufficient', () => {
@@ -46,5 +54,16 @@ test('requireRole throws forbidden when role is insufficient', () => {
   assert.throws(
     () => requireRole(req, 'secret', ['editor', 'admin']),
     (error: unknown) => error instanceof SessionAuthError && error.statusCode === 403,
+  );
+});
+
+test('getSessionSecret reports a session auth configuration error', () => {
+  delete process.env.SESSION_SECRET;
+  assert.throws(
+    () => getSessionSecret(),
+    (error: unknown) =>
+      error instanceof SessionAuthError &&
+      error.statusCode === 500 &&
+      error.code === 'SESSION_AUTH_ERROR',
   );
 });
