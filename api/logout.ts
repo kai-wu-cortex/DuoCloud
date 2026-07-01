@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
-import { logoutApiHandler } from '../src/server/logoutApi';
-import { sendApiError } from '../src/server/sessionAuth';
+import { logoutApiHandler } from '../src/server/logoutApi.ts';
+import { sendApiError } from '../src/server/sessionAuth.ts';
 
 export default async function handler(req: Request, res: Response): Promise<void> {
   try {
