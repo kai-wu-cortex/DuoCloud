@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { Document } from 'mongodb';
+import 'dotenv/config';
 import { getMongoCollection } from '../src/lib/mongodb';
 import { hashPassword, normalizeUsername } from '../src/server/loginApi';
 import type { UserRole } from '../src/server/sessionAuth';
