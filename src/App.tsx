@@ -61,7 +61,7 @@ export default function App() {
   const [knowledgeCloudStatus, setKnowledgeCloudStatus] = useState<'idle' | 'loading' | 'online' | 'offline'>('idle');
   
   // App-level state for persistent live sandbox interaction
-  const [knowledgeAssets, setKnowledgeAssets] = useState<KnowledgeAsset[]>([]);
+  const [knowledgeAssets, setKnowledgeAssets] = useState<KnowledgeAsset[]>(loadLocalKnowledgeFallback);
   const [practiceCards, setPracticeCards] = useState<PracticeCard[]>(() => loadPracticeCards(initialPracticeCards));
 
   const refreshKnowledgeAssets = useCallback(async () => {
