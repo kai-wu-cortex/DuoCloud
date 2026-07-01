@@ -361,6 +361,33 @@ function replaceAllReferences(value: string, replacements: Map<string, string>) 
   return nextValue;
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function stripMissingReferences(value: string, references: string[]) {
+  let nextValue = value;
+
+  for (const reference of references) {
+    const variants = Array.from(new Set([reference, decodeReference(reference)]));
+    for (const variant of variants) {
+      if (!variant) continue;
+      const escaped = escapeRegExp(variant);
+      nextValue = nextValue
+        .replace(new RegExp(`<img\\b[^>]*\\bsrc=["']${escaped}["'][^>]*>`, 'gi'), '')
+        .replace(new RegExp(`!\\[[^\\]]*]\\(${escaped}\\)`, 'g'), '')
+        .replace(new RegExp(`!\\[\\[${escaped}(?:\\|[^\\]]*)?]]`, 'gi'), '')
+        .split(variant)
+        .join('');
+    }
+  }
+
+  return nextValue
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim();
+}
+
 function createAdminCookie() {
   const token = createSessionToken(
     { uid: 'attachment-migration-admin', username: 'attachment-migration', role: 'admin' },
@@ -400,10 +427,11 @@ async function runBulkUpdate(assets: KnowledgeAsset[], cookie: string) {
 
 function printUsage() {
   console.log([
-    'Usage: npm run migrate:obsidian-images -- [--apply] [--vault /path/to/HotFoil_Database]',
+    'Usage: npm run migrate:obsidian-images -- [--apply] [--cleanup-missing] [--vault /path/to/HotFoil_Database]',
     '',
     'Default mode is dry-run: scans MongoDB and local Obsidian images without uploading or writing.',
     'Use --apply to compress images, upload to Vercel Blob, and update MongoDB knowledge cards.',
+    'Use --cleanup-missing to remove unresolved historical image references from knowledge cards.',
   ].join('\n'));
 }
 
@@ -416,6 +444,7 @@ async function main() {
   }
 
   const apply = args.includes('--apply');
+  const cleanupMissing = args.includes('--cleanup-missing');
   const vaultArgIndex = args.indexOf('--vault');
   const vaultPath = vaultArgIndex >= 0 ? args[vaultArgIndex + 1] : DEFAULT_VAULT_PATH;
   if (!vaultPath || !existsSync(vaultPath)) throw new Error(`Obsidian vault 不存在：${vaultPath}`);
@@ -442,17 +471,22 @@ async function main() {
   let compressedCount = 0;
   let uploadAttempt = 0;
   const uploadFailures: Array<{ assetId: string; title: string; reference: string; message: string }> = [];
+  let cleanedMissingReferenceCount = 0;
 
   for (const asset of assets) {
     const replacements = new Map<string, string>();
+    const missingByField = new Map<string, string[]>();
     const stringEntries = getStringFieldEntries(asset);
 
-    for (const [, value] of stringEntries) {
+    for (const [key, value] of stringEntries) {
       for (const rawReference of extractImageReferences(value)) {
         if (replacements.has(rawReference)) continue;
         const resolved = resolveReference(rawReference, asset, lookup, vaultPath);
         if (!resolved) {
           missing.push({ assetId: asset.id, title: asset.title, reference: rawReference });
+          if (cleanupMissing) {
+            missingByField.set(key, [...(missingByField.get(key) ?? []), rawReference]);
+          }
           continue;
         }
         matchedReferences.push(resolved);
@@ -499,6 +533,20 @@ async function main() {
         (nextAsset as unknown as Record<string, unknown>)[key] = replaceAllReferences(value, replacements);
       }
       updatedAssets.push(nextAsset);
+    } else if (cleanupMissing && missingByField.size > 0) {
+      const nextAsset: KnowledgeAsset = { ...asset };
+      let changed = false;
+      for (const [key, value] of stringEntries) {
+        const fieldMissing = missingByField.get(key);
+        if (!fieldMissing?.length) continue;
+        const cleaned = stripMissingReferences(value, fieldMissing);
+        if (cleaned !== value) {
+          (nextAsset as unknown as Record<string, unknown>)[key] = cleaned;
+          cleanedMissingReferenceCount += fieldMissing.length;
+          changed = true;
+        }
+      }
+      if (changed) updatedAssets.push(nextAsset);
     }
   }
 
@@ -516,6 +564,7 @@ async function main() {
   const uniqueMatchedFiles = new Set(matchedReferences.map(reference => reference.fullPath));
   console.log(JSON.stringify({
     mode: apply ? 'apply' : 'dry-run',
+    cleanupMissing,
     vaultPath,
     scannedAssets: assets.length,
     localImagesIndexed: lookup.images.length,
@@ -526,6 +575,7 @@ async function main() {
     compressedFiles: apply ? compressedCount : 0,
     uploadFailureCount: uploadFailures.length,
     uploadFailures: uploadFailures.slice(0, 30),
+    cleanedMissingReferences: cleanupMissing ? cleanedMissingReferenceCount : 0,
     originalMB: apply ? Number((totalOriginalBytes / 1024 / 1024).toFixed(2)) : 0,
     uploadedMB: apply ? Number((totalUploadedBytes / 1024 / 1024).toFixed(2)) : 0,
     estimatedMissingReferences: missing.slice(0, 30),
