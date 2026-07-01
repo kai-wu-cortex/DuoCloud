@@ -3,20 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { Suspense, lazy, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { 
   BookOpen, 
   Database, 
   Cpu, 
-  Settings,
   Workflow, 
   Menu,
   X,
-  FileText,
-  User,
-  ExternalLink,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  LogOut,
+  UserRound
 } from 'lucide-react';
 
 // Shared data and types
@@ -33,6 +31,8 @@ import {
   savePracticeCards,
 } from './lib/appState';
 import { curateKnowledgeAsset, curateKnowledgeAssets } from './lib/knowledgeCuration';
+import DuoCloudLogin from './components/DuoCloudLogin';
+import { AuthUser, getDuoCloudSession, signInToDuoCloud, signOutOfDuoCloud } from './lib/authApi';
 
 const CombatToolkit = lazy(() => import('./components/CombatToolkit'));
 const KnowledgeCloud = lazy(() => import('./components/KnowledgeCloud'));
@@ -49,6 +49,10 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'toolkit' | 'knowledge' | 'practice'>(initialTab);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [authStatus, setAuthStatus] = useState<'checking' | 'authenticated' | 'unauthenticated'>('checking');
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isSigningIn, setIsSigningIn] = useState(false);
   
   // App-level state for persistent live sandbox interaction
   const [knowledgeAssets, setKnowledgeAssets] = useState<KnowledgeAsset[]>(() => curateKnowledgeAssets(loadKnowledgeAssets(seededKnowledgeAssets)));
@@ -110,6 +114,89 @@ export default function App() {
     { id: 'knowledge', label: '知识云标答库', desc: 'Knowledge Cloud', icon: BookOpen },
     { id: 'practice', label: '实践云证据卡', desc: 'Practice Cloud', icon: Database },
   ] as const;
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSession = async () => {
+      try {
+        const user = await getDuoCloudSession();
+        if (!isMounted) return;
+
+        setAuthUser(user);
+        setAuthStatus(user ? 'authenticated' : 'unauthenticated');
+      } catch (error) {
+        if (!isMounted) return;
+
+        const message = error instanceof Error ? error.message : '登录状态验证失败。';
+        setAuthError(message);
+        setAuthUser(null);
+        setAuthStatus('unauthenticated');
+      }
+    };
+
+    void loadSession();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const handleSignIn = async (username: string, password: string) => {
+    setIsSigningIn(true);
+    setAuthError(null);
+
+    try {
+      const user = await signInToDuoCloud(username, password);
+      setAuthUser(user);
+      setAuthStatus('authenticated');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '登录失败。';
+      setAuthUser(null);
+      setAuthStatus('unauthenticated');
+      setAuthError(message);
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOutOfDuoCloud();
+    } finally {
+      setAuthUser(null);
+      setAuthError(null);
+      setAuthStatus('unauthenticated');
+      setIsMobileMenuOpen(false);
+    }
+  };
+
+  if (authStatus === 'checking') {
+    return (
+      <div className="min-h-screen bg-background text-on-background flex items-center justify-center p-6">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
+            <Workflow className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-lg font-bold text-primary">Double Cloud</p>
+            <p className="text-sm text-on-surface-variant">正在验证知识云登入状态...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (authStatus !== 'authenticated' || !authUser) {
+    return (
+      <DuoCloudLogin
+        isConfigured={true}
+        isSigningIn={isSigningIn}
+        error={authError}
+        onSignIn={handleSignIn}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background text-on-background flex font-sans selection:bg-primary/10 selection:text-primary" id="app-container">
@@ -196,6 +283,29 @@ export default function App() {
         {/* Sidebar Footer Details */}
         <div className="space-y-2">
           <div className="border-b border-outline-variant/50" />
+
+          <div className={`flex items-center ${isSidebarCollapsed ? 'md:justify-center md:p-1.5' : 'gap-3 p-2.5'} rounded-xl border border-outline-variant/60 bg-surface-container-high/60`}>
+            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
+              <UserRound className="w-4 h-4" />
+            </div>
+            <div className={`min-w-0 text-left ${isSidebarCollapsed ? 'md:hidden' : 'block'}`}>
+              <p className="text-[11px] font-bold text-on-surface truncate">{authUser.username}</p>
+              <p className="text-[10px] text-on-surface-variant/80 font-mono uppercase">{authUser.role}</p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => {
+              void handleSignOut();
+            }}
+            className={`w-full flex items-center rounded-xl border border-outline-variant/60 bg-surface-container-high/40 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition ${
+              isSidebarCollapsed ? 'md:justify-center md:px-0 px-3 py-2.5' : 'gap-3 px-3 py-2.5'
+            }`}
+            title={isSidebarCollapsed ? '退出登录' : undefined}
+          >
+            <LogOut className="w-4 h-4 shrink-0" />
+            <span className={`text-[11px] font-bold ${isSidebarCollapsed ? 'md:hidden' : 'block'}`}>退出登录</span>
+          </button>
           
           <div className={`flex items-center ${isSidebarCollapsed ? 'md:justify-center md:p-1' : 'gap-4 p-2.5'} rounded-xl bg-surface-container-high/60`}>
             <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-xs shrink-0">
