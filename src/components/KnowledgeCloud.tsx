@@ -1747,7 +1747,7 @@ export default function KnowledgeCloud({
                             key={option.id}
                             type="button"
                             onClick={() => setCardSpacing(option.id as 'regular' | 'wide')}
-                            className={`h-7 px-2 rounded-lg text-[11px] font-black transition cursor-pointer ${
+                            className={`h-7 min-w-8 px-2 rounded-lg text-[11px] font-black transition cursor-pointer ${
                               cardSpacing === option.id ? 'bg-[#5F52EE] text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'
                             }`}
                             title={`卡片间距：${option.label}`}
@@ -2044,7 +2044,7 @@ export default function KnowledgeCloud({
         {viewMode === 'grid' ? (
           <div
             className={`flex-1 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 pt-1 pb-12 pr-2 custom-scrollbar ${
-              cardSpacing === 'wide' ? 'gap-3' : 'gap-4'
+              cardSpacing === 'wide' ? 'gap-2' : 'gap-3'
             } ${
               cardsPerRow === 3 ? 'lg:grid-cols-3' : cardsPerRow === 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-5'
             }`}
