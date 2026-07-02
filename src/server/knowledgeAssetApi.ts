@@ -564,10 +564,7 @@ async function upsertKnowledgeAsset(
     existing
     && existing.serverStatus !== 'archived'
     && !existing.serverDeletedAt
-    && (
-      options.source === 'obsidian_import'
-      || isSameKnowledgeAssetContent(existing, asset)
-    )
+    && isSameKnowledgeAssetContent(existing, asset)
   ) {
     return { status: 'skipped', asset: existing };
   }

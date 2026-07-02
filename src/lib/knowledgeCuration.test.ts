@@ -65,7 +65,7 @@ test('curation is stable when applied more than once', () => {
 
   assert.equal((twice.content.match(/## 核心信息/g) || []).length, 1);
   assert.equal((twice.content.match(/## 结构化字段/g) || []).length, 1);
-  assert.equal(twice.content.includes('## 原文摘录'), true);
+  assert.equal(twice.content.includes('## 原始文章'), true);
 });
 
 test('curated structured fields render as a markdown table', () => {

@@ -23,6 +23,7 @@ export interface KnowledgeAssetBase {
   lastUpdated: string;
   author: string;
   content: string;
+  originalMarkdown?: string;
   access?: 'public' | 'private';
   ownerUid?: string;
   ownerUsername?: string;

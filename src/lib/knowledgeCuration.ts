@@ -55,6 +55,8 @@ function getSourceContent(value: string) {
   const content = String(value ?? '');
   const originalExcerptIndex = content.indexOf('## 原文摘录');
   if (originalExcerptIndex >= 0) return content.slice(originalExcerptIndex).replace(/^## 原文摘录\s*/, '').trim();
+  const originalArticleIndex = content.indexOf('## 原始文章');
+  if (originalArticleIndex >= 0) return content.slice(originalArticleIndex).replace(/^## 原始文章\s*/, '').trim();
   return content;
 }
 
@@ -181,7 +183,7 @@ function collectKeywords(asset: KnowledgeAsset, title: string, text: string) {
 
 export function curateKnowledgeAsset(asset: KnowledgeAsset): KnowledgeAsset {
   const title = cleanTitle(asset.title, asset);
-  const sourceContent = getSourceContent(asset.content);
+  const sourceContent = asset.originalMarkdown || getSourceContent(asset.content);
   const text = getPlainText(sourceContent);
   const importantLines = pickImportantLines(text, title);
   const fieldRows = buildFieldRows(asset);
@@ -212,7 +214,7 @@ export function curateKnowledgeAsset(asset: KnowledgeAsset): KnowledgeAsset {
     ].join('\n'),
     sourceTables.length > 0 ? ['## 原文表格', ...sourceTables].join('\n\n') : '',
     images.length > 0 ? ['## 图片资料', ...images].join('\n') : '',
-    text ? ['## 原文摘录', text.slice(0, 1200)].join('\n') : '',
+    sourceContent ? ['## 原始文章', sourceContent.trim()].join('\n\n') : '',
   ].filter(Boolean);
 
   return {
@@ -220,6 +222,7 @@ export function curateKnowledgeAsset(asset: KnowledgeAsset): KnowledgeAsset {
     title,
     tags: collectKeywords(asset, title, text),
     content: sections.join('\n\n'),
+    originalMarkdown: asset.originalMarkdown || sourceContent,
   } as KnowledgeAsset;
 }
 
