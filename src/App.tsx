@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
+  MessageCircle,
   UserRound
 } from 'lucide-react';
 
@@ -46,10 +47,93 @@ const CombatToolkit = lazy(() => import('./components/CombatToolkit'));
 const KnowledgeCloud = lazy(() => import('./components/KnowledgeCloud'));
 const PracticeCloud = lazy(() => import('./components/PracticeCloud'));
 
+const DIFY_CHATBOT_TOKEN = 'Pqyg8S5HUiWNYD72';
+const DIFY_EMBED_SRC = 'https://udify.app/embed.min.js';
+
 const seededKnowledgeAssets = curateKnowledgeAssets([...obsidianKnowledgeAssets, ...initialKnowledgeAssets]);
 
 function loadLocalKnowledgeFallback() {
   return curateKnowledgeAssets(loadKnowledgeAssets(seededKnowledgeAssets));
+}
+
+type DifyWindow = Window & {
+  difyChatbotConfig?: {
+    token: string;
+    inputs: Record<string, unknown>;
+    systemVariables: Record<string, unknown>;
+    userVariables: Record<string, unknown>;
+  };
+};
+
+function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boolean }) {
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const difyWindow = window as DifyWindow;
+    difyWindow.difyChatbotConfig = {
+      token: DIFY_CHATBOT_TOKEN,
+      inputs: {},
+      systemVariables: {},
+      userVariables: {},
+    };
+
+    if (!document.getElementById('dify-chatbot-style-overrides')) {
+      const style = document.createElement('style');
+      style.id = 'dify-chatbot-style-overrides';
+      style.textContent = `
+        #dify-chatbot-bubble-button {
+          background-color: #1C64F2 !important;
+          display: none !important;
+        }
+        #dify-chatbot-bubble-window {
+          width: 24rem !important;
+          height: 40rem !important;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    if (!document.getElementById(DIFY_CHATBOT_TOKEN)) {
+      const script = document.createElement('script');
+      script.src = DIFY_EMBED_SRC;
+      script.id = DIFY_CHATBOT_TOKEN;
+      script.defer = true;
+      document.body.appendChild(script);
+    }
+  }, []);
+
+  const openDifyChatbot = () => {
+    const bubbleButton = document.getElementById('dify-chatbot-bubble-button') as HTMLButtonElement | null;
+    if (bubbleButton) {
+      bubbleButton.click();
+      return;
+    }
+
+    window.setTimeout(() => {
+      const delayedBubbleButton = document.getElementById('dify-chatbot-bubble-button') as HTMLButtonElement | null;
+      delayedBubbleButton?.click();
+    }, 600);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={openDifyChatbot}
+      className={`w-full flex items-center rounded-xl border border-primary/15 bg-primary/10 text-primary hover:bg-primary hover:text-white shadow-sm shadow-primary/5 transition ${
+        isSidebarCollapsed ? 'md:justify-center md:p-1.5 p-2.5' : 'gap-3 p-2.5'
+      }`}
+      title={isSidebarCollapsed ? 'Dify AI 助手' : undefined}
+      id="dify-sidebar-launcher"
+    >
+      <div className="w-8 h-8 rounded-lg bg-white/70 flex items-center justify-center text-primary shrink-0">
+        <MessageCircle className="w-4 h-4" />
+      </div>
+      <div className={`min-w-0 text-left ${isSidebarCollapsed ? 'md:hidden' : 'block'}`}>
+        <p className="text-[11px] font-bold leading-tight">Dify AI 助手</p>
+        <p className="text-[10px] font-mono opacity-75 leading-tight">Knowledge Copilot</p>
+      </div>
+    </button>
+  );
 }
 
 export default function App() {
@@ -430,15 +514,7 @@ export default function App() {
             <span className={`text-[11px] font-bold ${isSidebarCollapsed ? 'md:hidden' : 'block'}`}>退出登录</span>
           </button>
           
-          <div className={`flex items-center ${isSidebarCollapsed ? 'md:justify-center md:p-1' : 'gap-4 p-2.5'} rounded-xl bg-surface-container-high/60`}>
-            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-xs shrink-0">
-              M1
-            </div>
-            <div className={`text-left ${isSidebarCollapsed ? 'md:hidden' : 'block'}`}>
-              <p className="text-[11px] font-bold text-on-surface">外贸精工系统</p>
-              <p className="text-[10px] text-on-surface-variant/80 font-mono">Enterprise v1.2</p>
-            </div>
-          </div>
+          <DifyChatbotLauncher isSidebarCollapsed={isSidebarCollapsed} />
 
           <div className={`text-[10px] text-on-surface-variant/60 leading-relaxed font-mono ${isSidebarCollapsed ? 'md:hidden' : 'block'}`}>
             <div className="flex items-center gap-1">
