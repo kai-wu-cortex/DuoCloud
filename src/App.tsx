@@ -70,6 +70,7 @@ async function loadFullLocalKnowledgeFallback() {
 type DifyWindow = Window & {
   difyChatbotConfig?: {
     token: string;
+    dynamicScript: boolean;
     inputs: Record<string, unknown>;
     systemVariables: Record<string, unknown>;
     userVariables: Record<string, unknown>;
@@ -85,6 +86,7 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
     const difyWindow = window as DifyWindow;
     difyWindow.difyChatbotConfig = {
       token: DIFY_CHATBOT_TOKEN,
+      dynamicScript: true,
       inputs: {},
       systemVariables: {},
       userVariables: {},
@@ -112,13 +114,15 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
       }
     `;
 
-    if (!document.getElementById(DIFY_CHATBOT_TOKEN)) {
-      const script = document.createElement('script');
-      script.src = DIFY_EMBED_SRC;
-      script.id = DIFY_CHATBOT_TOKEN;
-      script.defer = true;
-      document.body.appendChild(script);
-    }
+    document.getElementById('dify-chatbot-bubble-button')?.remove();
+    document.getElementById('dify-chatbot-bubble-window')?.remove();
+    document.getElementById(DIFY_CHATBOT_TOKEN)?.remove();
+
+    const script = document.createElement('script');
+    script.src = DIFY_EMBED_SRC;
+    script.id = DIFY_CHATBOT_TOKEN;
+    script.defer = true;
+    document.body.appendChild(script);
   }, []);
 
   const openDifyChatbot = () => {
