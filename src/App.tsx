@@ -17,8 +17,7 @@ import {
   LogOut,
   MessageCircle,
   UserRound,
-  Maximize2,
-  Minimize2
+  Maximize2
 } from 'lucide-react';
 
 // Shared data and types
@@ -132,7 +131,7 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
         backdrop-filter: blur(18px) saturate(1.25) !important;
         -webkit-backdrop-filter: blur(18px) saturate(1.25) !important;
         box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24), 0 0 0 1px rgba(255, 255, 255, 0.35) inset !important;
-        z-index: 2147483000 !important;
+        z-index: 2147482999 !important;
         transition: width 180ms ease, height 180ms ease, inset 180ms ease, border-radius 180ms ease, box-shadow 180ms ease !important;
       }
       html.dify-chatbot-fullscreen #dify-chatbot-bubble-window {
@@ -172,6 +171,12 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
     bubbleWindow.style.setProperty('opacity', '1', 'important');
   }, []);
 
+  const hideDifyWindow = useCallback((bubbleWindow: HTMLElement) => {
+    bubbleWindow.style.setProperty('display', 'none', 'important');
+    bubbleWindow.style.setProperty('visibility', 'hidden', 'important');
+    bubbleWindow.style.setProperty('opacity', '0', 'important');
+  }, []);
+
   const syncDifyWindowFrame = useCallback(() => {
     const bubbleWindow = document.getElementById('dify-chatbot-bubble-window') as HTMLElement | null;
     if (!bubbleWindow) return false;
@@ -184,7 +189,7 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
 
     bubbleWindow.style.setProperty('position', 'fixed', 'important');
     bubbleWindow.style.setProperty('transform', 'none', 'important');
-    bubbleWindow.style.setProperty('z-index', '2147483000', 'important');
+    bubbleWindow.style.setProperty('z-index', '2147482999', 'important');
     bubbleWindow.style.setProperty('overflow', 'hidden', 'important');
 
     if (isDifyFullscreen) {
@@ -257,7 +262,16 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
     return () => window.clearInterval(intervalId);
   }, [isDifyOpen, isDifyWindowVisible, syncDifyWindowFrame]);
 
-  const openDifyChatbot = () => {
+  const toggleDifyChatbot = () => {
+    const existingWindow = document.getElementById('dify-chatbot-bubble-window') as HTMLElement | null;
+    if (isDifyOpen && existingWindow && isDifyWindowVisible(existingWindow)) {
+      hideDifyWindow(existingWindow);
+      setIsDifyOpen(false);
+      setIsDifyFullscreen(false);
+      setDifyControlPosition({ top: 0, right: 0 });
+      return;
+    }
+
     let attempts = 0;
     setIsOpening(true);
 
@@ -304,14 +318,14 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
     <>
       <button
         type="button"
-        onClick={openDifyChatbot}
-        className={`w-full flex items-center rounded-xl border border-primary/15 bg-primary/10 text-primary hover:bg-primary hover:text-white shadow-sm shadow-primary/5 transition ${
+        onClick={toggleDifyChatbot}
+        className={`w-full flex items-center rounded-xl border border-[#1C64F2]/20 bg-[#1C64F2] text-white hover:bg-[#1557D6] shadow-sm shadow-[#1C64F2]/20 transition ${
           isSidebarCollapsed ? 'md:justify-center md:p-1.5 p-2.5' : 'gap-3 p-2.5'
         }`}
         title={isSidebarCollapsed ? 'Dify AI 助手' : undefined}
         id="dify-sidebar-launcher"
       >
-        <div className="w-8 h-8 rounded-lg bg-white/70 flex items-center justify-center text-primary shrink-0">
+        <div className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center text-white shrink-0">
           <MessageCircle className="w-4 h-4" />
         </div>
         <div className={`min-w-0 text-left ${isSidebarCollapsed ? 'md:hidden' : 'block'}`}>
@@ -324,7 +338,7 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
         <button
           type="button"
           onClick={() => setIsDifyFullscreen(value => !value)}
-          className="fixed z-[2147483001] w-8 h-8 rounded-lg bg-white/90 border border-white/60 text-[#1C64F2] shadow-lg shadow-slate-900/15 backdrop-blur-md flex items-center justify-center hover:bg-white transition"
+          className="fixed z-[2147483001] w-8 h-8 rounded-lg bg-transparent border-0 text-[#1C64F2] shadow-none flex items-center justify-center hover:text-[#1557D6] transition"
           style={{
             top: `${difyControlPosition.top}px`,
             right: `${difyControlPosition.right}px`,
@@ -332,7 +346,7 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
           title={isDifyFullscreen ? '退出全屏' : '全屏显示'}
           aria-label={isDifyFullscreen ? '退出全屏' : '全屏显示'}
         >
-          {isDifyFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          <Maximize2 className="w-4 h-4" />
         </button>,
         document.body,
       )}

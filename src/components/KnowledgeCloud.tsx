@@ -1657,9 +1657,9 @@ export default function KnowledgeCloud({
       </div>
 
       {/* Main content column on the right */}
-      <div className="flex-1 flex flex-col gap-5 overflow-hidden lg:pl-[17.5rem]">
-        <div className="flex flex-col gap-3 pb-2 shrink-0">
-          <div className="flex flex-col gap-3">
+      <div className="flex-1 flex flex-col gap-4 overflow-hidden lg:pl-[17.5rem]">
+        <div className="flex flex-col gap-2 pb-1 shrink-0">
+          <div className="flex flex-col gap-2">
             <h1 className="text-xl md:text-2xl font-black text-[#0D0B3D] tracking-tight flex flex-wrap items-baseline gap-x-2 gap-y-1 min-w-0">
               <span>{categoryTitle}</span>
               {activeDirectoryLabel && <span className="text-[#5F52EE] text-sm font-black">/ {activeDirectoryLabel}</span>}
@@ -1676,8 +1676,8 @@ export default function KnowledgeCloud({
               )}
             </h1>
 
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:overflow-x-auto sm:pb-1 sm:[scrollbar-width:none] sm:[&::-webkit-scrollbar]:hidden">
-              <div className="relative bg-white border border-[#E2E4E9] rounded-xl px-3 py-2 flex items-center gap-2 shadow-sm focus-within:border-slate-300 transition min-w-0 w-full sm:w-[12rem] xl:w-[10rem] 2xl:w-[10rem] shrink-0">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 w-full sm:overflow-x-auto sm:pb-1 sm:[scrollbar-width:none] sm:[&::-webkit-scrollbar]:hidden">
+              <div className="relative bg-white border border-[#E2E4E9] rounded-xl px-3 py-2 flex items-center gap-2 shadow-sm focus-within:border-slate-300 transition min-w-0 w-full sm:w-[11rem] xl:w-[9.5rem] 2xl:w-[9.5rem] shrink-0">
                   <Search className="w-4 h-4 text-slate-400 shrink-0" />
                   <input
                     type="text"
@@ -1694,7 +1694,7 @@ export default function KnowledgeCloud({
                   )}
                 </div>
 
-                <div className="flex flex-wrap sm:flex-nowrap items-center justify-start gap-1.5 min-w-0 sm:min-w-max">
+                <div className="flex flex-wrap sm:flex-nowrap items-center justify-start gap-1 min-w-0 sm:min-w-max">
                   <div className="flex items-center border border-[#E2E4E9] rounded-xl bg-white p-1 shadow-sm shrink-0">
                     <button
                       onClick={() => setViewMode('grid')}
@@ -1741,7 +1741,7 @@ export default function KnowledgeCloud({
                       <div className="flex items-center gap-0.5 shrink-0">
                         {[
                           { id: 'regular', label: '常规' },
-                          { id: 'wide', label: '宽' },
+                          { id: 'wide', label: '窄' },
                         ].map(option => (
                           <button
                             key={option.id}
@@ -1763,7 +1763,7 @@ export default function KnowledgeCloud({
                     type="button"
                     onClick={toggleEditMode}
                     disabled={!canEdit}
-                    className={`flex items-center justify-center gap-1.5 px-2.5 py-2 font-extrabold text-xs rounded-xl transition shadow-sm shrink-0 ${
+                    className={`flex items-center justify-center gap-1.5 px-2 py-2 font-extrabold text-xs rounded-xl transition shadow-sm shrink-0 ${
                       !canEdit
                         ? 'bg-slate-100 border border-[#E2E4E9] text-slate-300 cursor-not-allowed'
                         : isEditMode
@@ -1789,7 +1789,7 @@ export default function KnowledgeCloud({
                     type="button"
                     onClick={() => importInputRef.current?.click()}
                     disabled={!canAdmin}
-                    className={`flex items-center justify-center gap-1.5 px-2.5 py-2 border font-extrabold text-xs rounded-xl transition shadow-sm shrink-0 ${
+                    className={`flex items-center justify-center gap-1.5 px-2 py-2 border font-extrabold text-xs rounded-xl transition shadow-sm shrink-0 ${
                       canAdmin
                         ? 'bg-white border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] cursor-pointer'
                         : 'bg-slate-100 border-[#E2E4E9] text-slate-300 cursor-not-allowed'
@@ -1803,7 +1803,7 @@ export default function KnowledgeCloud({
                   <button
                     type="button"
                     onClick={handleExportWorkbook}
-                    className="flex items-center justify-center gap-1.5 px-2.5 py-2 bg-white border border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] font-extrabold text-xs rounded-xl transition shadow-sm cursor-pointer shrink-0"
+                    className="flex items-center justify-center gap-1.5 px-2 py-2 bg-white border border-[#E2E4E9] text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] font-extrabold text-xs rounded-xl transition shadow-sm cursor-pointer shrink-0"
                     id="knowledge-export-btn"
                     title="导出当前筛选结果为知识云字段模板 Excel"
                   >
@@ -1814,7 +1814,7 @@ export default function KnowledgeCloud({
                   <button
                     onClick={openCreateAssetDrawer}
                     disabled={!canEdit}
-                    className={`flex items-center justify-center gap-1.5 px-3 py-2 font-extrabold text-xs rounded-xl transition shadow-md shadow-primary/10 shrink-0 ${
+                    className={`flex items-center justify-center gap-1.5 px-2.5 py-2 font-extrabold text-xs rounded-xl transition shadow-md shadow-primary/10 shrink-0 ${
                       canEdit
                         ? 'bg-[#5F52EE] hover:bg-[#4E41DC] text-white cursor-pointer'
                         : 'bg-slate-200 text-slate-400 cursor-not-allowed'
@@ -1832,7 +1832,7 @@ export default function KnowledgeCloud({
                       void handleRefreshAssets();
                     }}
                     disabled={isSyncing}
-                    className={`flex items-center justify-center gap-1.5 px-2.5 py-2 bg-white border border-[#E2E4E9] font-extrabold text-xs rounded-xl transition shadow-sm shrink-0 ${
+                    className={`flex items-center justify-center gap-1.5 px-2 py-2 bg-white border border-[#E2E4E9] font-extrabold text-xs rounded-xl transition shadow-sm shrink-0 ${
                       isSyncing
                         ? 'text-[#5F52EE] border-[#5F52EE]/40 cursor-wait'
                         : 'text-[#0D0B3D] hover:border-[#5F52EE]/50 hover:text-[#5F52EE] cursor-pointer'
@@ -1970,7 +1970,7 @@ export default function KnowledgeCloud({
                 <div className="flex items-center gap-1">
                   {[
                     { id: 'regular', label: '常规' },
-                    { id: 'wide', label: '宽' },
+                    { id: 'wide', label: '窄' },
                   ].map(option => (
                     <button
                       key={option.id}
@@ -2016,7 +2016,7 @@ export default function KnowledgeCloud({
         </div>
 
         {/* Main Content Pane */}
-        <div className="flex-1 flex flex-col gap-4 overflow-hidden">
+        <div className="flex-1 flex flex-col gap-3 overflow-hidden">
           {/* Section Heading like "Recently Created" */}
           <div className="flex items-center justify-between font-medium shrink-0">
             <span className="text-xs font-extrabold text-slate-400 tracking-wider uppercase">
@@ -2043,8 +2043,8 @@ export default function KnowledgeCloud({
         {/* Grid and Card Renderers */}
         {viewMode === 'grid' ? (
           <div
-            className={`flex-1 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 pt-2 pb-12 pr-2 custom-scrollbar ${
-              cardSpacing === 'wide' ? 'gap-6' : 'gap-4'
+            className={`flex-1 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 pt-1 pb-12 pr-2 custom-scrollbar ${
+              cardSpacing === 'wide' ? 'gap-3' : 'gap-4'
             } ${
               cardsPerRow === 3 ? 'lg:grid-cols-3' : cardsPerRow === 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-5'
             }`}
@@ -2076,7 +2076,7 @@ export default function KnowledgeCloud({
                       }
                       openAssetDetail(asset);
                     }}
-                    className={`knowledge-grid-card group relative rounded-[20px] px-4 py-3.5 transition-all duration-300 cursor-pointer flex flex-col justify-between h-[168px] select-none ${
+                    className={`knowledge-grid-card group relative rounded-[18px] px-3.5 py-3 transition-all duration-300 cursor-pointer flex flex-col justify-between h-[162px] select-none ${
                       isSelectedForEdit
                         ? 'bg-white border-2 border-[#5F52EE] text-on-background shadow-lg shadow-[#5F52EE]/15'
                         : isActive 
@@ -2139,7 +2139,7 @@ export default function KnowledgeCloud({
 
                     {/* Content Section */}
                     {cardImage?.previewSrc ? (
-                      <div className="mt-2.5 flex-1 min-h-0 grid grid-cols-[minmax(0,1fr)_5.8rem] gap-3 items-stretch">
+                      <div className="mt-2 flex-1 min-h-0 grid grid-cols-[minmax(0,1fr)_5.4rem] gap-2.5 items-stretch">
                         <div className="min-w-0 flex flex-col justify-center">
                           <h3 className={`font-black tracking-tight text-[13px] leading-snug line-clamp-2 ${
                             isActive && !isEditMode ? 'text-white' : 'text-[#0D0B3D]'
@@ -2179,7 +2179,7 @@ export default function KnowledgeCloud({
                     )}
 
                     {/* Bottom Metadata row */}
-                    <div className={`flex items-center justify-between gap-3 text-[10px] font-extrabold pt-2.5 border-t font-mono tracking-wider uppercase ${
+                    <div className={`flex items-center justify-between gap-2 text-[10px] font-extrabold pt-2 border-t font-mono tracking-wider uppercase ${
                       isActive && !isEditMode ? 'border-white/10 text-white/70' : 'border-[#F1F3F7] text-slate-400'
                     }`}>
                       <div className="flex items-center gap-1 min-w-0">
