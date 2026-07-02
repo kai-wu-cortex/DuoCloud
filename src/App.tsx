@@ -4,6 +4,7 @@
  */
 
 import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   BookOpen, 
   Database, 
@@ -83,6 +84,7 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
   const [isOpening, setIsOpening] = useState(false);
   const [isDifyOpen, setIsDifyOpen] = useState(false);
   const [isDifyFullscreen, setIsDifyFullscreen] = useState(false);
+  const [difyControlPosition, setDifyControlPosition] = useState({ top: 0, right: 0 });
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -114,8 +116,11 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
       }
       #dify-chatbot-bubble-window {
         position: fixed !important;
+        top: auto !important;
+        left: auto !important;
         right: max(1rem, env(safe-area-inset-right)) !important;
         bottom: max(1rem, env(safe-area-inset-bottom)) !important;
+        transform: none !important;
         width: min(28rem, calc(100vw - 2rem)) !important;
         height: min(44rem, calc(100vh - 2rem)) !important;
         max-width: calc(100vw - 2rem) !important;
@@ -131,9 +136,12 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
         transition: width 180ms ease, height 180ms ease, inset 180ms ease, border-radius 180ms ease, box-shadow 180ms ease !important;
       }
       html.dify-chatbot-fullscreen #dify-chatbot-bubble-window {
-        inset: max(0.75rem, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right)) max(0.75rem, env(safe-area-inset-bottom)) max(0.75rem, env(safe-area-inset-left)) !important;
-        width: auto !important;
-        height: auto !important;
+        top: max(0.75rem, env(safe-area-inset-top)) !important;
+        right: max(0.75rem, env(safe-area-inset-right)) !important;
+        bottom: max(0.75rem, env(safe-area-inset-bottom)) !important;
+        left: max(0.75rem, env(safe-area-inset-left)) !important;
+        width: calc(100vw - max(0.75rem, env(safe-area-inset-left)) - max(0.75rem, env(safe-area-inset-right))) !important;
+        height: calc(100vh - max(0.75rem, env(safe-area-inset-top)) - max(0.75rem, env(safe-area-inset-bottom))) !important;
         max-width: none !important;
         max-height: none !important;
         border-radius: 18px !important;
@@ -152,10 +160,78 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
     document.body.appendChild(script);
   }, []);
 
+  const isDifyWindowVisible = useCallback((bubbleWindow: HTMLElement) => {
+    const rect = bubbleWindow.getBoundingClientRect();
+    const styles = window.getComputedStyle(bubbleWindow);
+    return styles.display !== 'none' && styles.visibility !== 'hidden' && rect.width > 20 && rect.height > 20;
+  }, []);
+
+  const showDifyWindow = useCallback((bubbleWindow: HTMLElement) => {
+    bubbleWindow.style.setProperty('display', 'flex', 'important');
+    bubbleWindow.style.setProperty('visibility', 'visible', 'important');
+    bubbleWindow.style.setProperty('opacity', '1', 'important');
+  }, []);
+
+  const syncDifyWindowFrame = useCallback(() => {
+    const bubbleWindow = document.getElementById('dify-chatbot-bubble-window') as HTMLElement | null;
+    if (!bubbleWindow) return false;
+
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const margin = isDifyFullscreen ? 12 : 16;
+    const normalWidth = Math.min(448, Math.max(320, viewportWidth - margin * 2));
+    const normalHeight = Math.min(704, Math.max(360, viewportHeight - margin * 2));
+
+    bubbleWindow.style.setProperty('position', 'fixed', 'important');
+    bubbleWindow.style.setProperty('transform', 'none', 'important');
+    bubbleWindow.style.setProperty('z-index', '2147483000', 'important');
+    bubbleWindow.style.setProperty('overflow', 'hidden', 'important');
+
+    if (isDifyFullscreen) {
+      const fullscreenWidth = Math.max(320, viewportWidth - margin * 2);
+      const fullscreenHeight = Math.max(360, viewportHeight - margin * 2);
+      bubbleWindow.style.setProperty('top', `${margin}px`, 'important');
+      bubbleWindow.style.setProperty('right', `${margin}px`, 'important');
+      bubbleWindow.style.setProperty('bottom', `${margin}px`, 'important');
+      bubbleWindow.style.setProperty('left', `${margin}px`, 'important');
+      bubbleWindow.style.setProperty('width', `${fullscreenWidth}px`, 'important');
+      bubbleWindow.style.setProperty('height', `${fullscreenHeight}px`, 'important');
+      bubbleWindow.style.setProperty('max-width', 'none', 'important');
+      bubbleWindow.style.setProperty('max-height', 'none', 'important');
+      bubbleWindow.style.setProperty('border-radius', '18px', 'important');
+    } else {
+      bubbleWindow.style.setProperty('top', 'auto', 'important');
+      bubbleWindow.style.setProperty('left', 'auto', 'important');
+      bubbleWindow.style.setProperty('right', `${margin}px`, 'important');
+      bubbleWindow.style.setProperty('bottom', `${margin}px`, 'important');
+      bubbleWindow.style.setProperty('width', `${normalWidth}px`, 'important');
+      bubbleWindow.style.setProperty('height', `${normalHeight}px`, 'important');
+      bubbleWindow.style.setProperty('max-width', `calc(100vw - ${margin * 2}px)`, 'important');
+      bubbleWindow.style.setProperty('max-height', `calc(100vh - ${margin * 2}px)`, 'important');
+      bubbleWindow.style.setProperty('border-radius', '24px', 'important');
+    }
+
+    const rect = bubbleWindow.getBoundingClientRect();
+    setDifyControlPosition({
+      top: Math.max(rect.top + 14, 10),
+      right: Math.max(viewportWidth - rect.right + 14, 10),
+    });
+    return true;
+  }, [isDifyFullscreen]);
+
   useEffect(() => {
     document.documentElement.classList.toggle('dify-chatbot-fullscreen', isDifyFullscreen);
     return () => document.documentElement.classList.remove('dify-chatbot-fullscreen');
   }, [isDifyFullscreen]);
+
+  useEffect(() => {
+    if (!isDifyOpen) return undefined;
+
+    syncDifyWindowFrame();
+    const handleResize = () => syncDifyWindowFrame();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [isDifyOpen, syncDifyWindowFrame]);
 
   useEffect(() => {
     if (!isDifyOpen) return undefined;
@@ -168,17 +244,18 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
         return;
       }
 
-      const rect = bubbleWindow.getBoundingClientRect();
-      const styles = window.getComputedStyle(bubbleWindow);
-      const isVisible = styles.display !== 'none' && styles.visibility !== 'hidden' && rect.width > 20 && rect.height > 20;
-      if (!isVisible) {
+      if (!isDifyWindowVisible(bubbleWindow)) {
         setIsDifyOpen(false);
         setIsDifyFullscreen(false);
+        setDifyControlPosition({ top: 0, right: 0 });
+        return;
       }
+
+      syncDifyWindowFrame();
     }, 600);
 
     return () => window.clearInterval(intervalId);
-  }, [isDifyOpen]);
+  }, [isDifyOpen, isDifyWindowVisible, syncDifyWindowFrame]);
 
   const openDifyChatbot = () => {
     let attempts = 0;
@@ -187,20 +264,26 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
     const clickWhenReady = () => {
       const bubbleWindow = document.getElementById('dify-chatbot-bubble-window') as HTMLElement | null;
       if (bubbleWindow) {
-        const rect = bubbleWindow.getBoundingClientRect();
-        const styles = window.getComputedStyle(bubbleWindow);
-        const isVisible = styles.display !== 'none' && styles.visibility !== 'hidden' && rect.width > 20 && rect.height > 20;
-        if (isVisible) {
-          setIsDifyOpen(true);
-          setIsOpening(false);
-          return;
-        }
+        showDifyWindow(bubbleWindow);
+        setIsDifyOpen(true);
+        window.requestAnimationFrame(() => syncDifyWindowFrame());
+        window.setTimeout(syncDifyWindowFrame, 120);
+        setIsOpening(false);
+        return;
       }
 
       const bubbleButton = document.getElementById('dify-chatbot-bubble-button') as HTMLElement | null;
       if (bubbleButton) {
-        bubbleButton.click();
-        setIsDifyOpen(true);
+        const openIcon = document.getElementById('openIcon');
+        (openIcon ?? bubbleButton).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        window.setTimeout(() => {
+          const openedWindow = document.getElementById('dify-chatbot-bubble-window') as HTMLElement | null;
+          if (openedWindow) {
+            showDifyWindow(openedWindow);
+            setIsDifyOpen(true);
+            syncDifyWindowFrame();
+          }
+        }, 120);
         setIsOpening(false);
         return;
       }
@@ -237,20 +320,21 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
         </div>
       </button>
 
-      {isDifyOpen && (
+      {isDifyOpen && typeof document !== 'undefined' && createPortal(
         <button
           type="button"
           onClick={() => setIsDifyFullscreen(value => !value)}
-          className={`fixed z-[2147483001] w-9 h-9 rounded-lg bg-white/90 border border-white/60 text-[#1C64F2] shadow-lg shadow-slate-900/15 backdrop-blur-md flex items-center justify-center hover:bg-white transition ${
-            isDifyFullscreen
-              ? 'right-7 top-7'
-              : 'right-[calc(max(1rem,env(safe-area-inset-right))+0.75rem)] bottom-[calc(min(44rem,calc(100vh-2rem))-2.75rem)]'
-          }`}
+          className="fixed z-[2147483001] w-8 h-8 rounded-lg bg-white/90 border border-white/60 text-[#1C64F2] shadow-lg shadow-slate-900/15 backdrop-blur-md flex items-center justify-center hover:bg-white transition"
+          style={{
+            top: `${difyControlPosition.top}px`,
+            right: `${difyControlPosition.right}px`,
+          }}
           title={isDifyFullscreen ? '退出全屏' : '全屏显示'}
           aria-label={isDifyFullscreen ? '退出全屏' : '全屏显示'}
         >
           {isDifyFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-        </button>
+        </button>,
+        document.body,
       )}
     </>
   );
