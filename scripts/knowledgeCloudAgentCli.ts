@@ -16,12 +16,14 @@ const repoRoot = join(__dirname, '..');
 config({ path: join(repoRoot, '.env.local'), quiet: true });
 config({ path: join(repoRoot, '.env'), quiet: true });
 
-type Mode = 'obsidian' | 'file' | 'export';
+type Mode = 'obsidian' | 'file' | 'export' | 'health' | 'upsert' | 'patch' | 'delete';
 
 interface CliOptions {
   mode: Mode;
   vault: string;
   file?: string;
+  id?: string;
+  patch: Record<string, string>;
   endpoint?: string;
   token?: string;
   input: string;
@@ -52,13 +54,27 @@ function parseArgs(argv: string[]): CliOptions {
     source: 'obsidian_import',
     chunkSize: 100,
     dryRun: false,
+    patch: {},
   };
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const next = argv[index + 1];
-    if (arg === 'obsidian' || arg === 'file' || arg === 'export') {
+    if (
+      arg === 'obsidian'
+      || arg === 'file'
+      || arg === 'export'
+      || arg === 'health'
+      || arg === 'upsert'
+      || arg === 'patch'
+      || arg === 'delete'
+    ) {
       options.mode = arg;
+      continue;
+    }
+    if (arg === '--id' && next) {
+      options.id = next;
+      index += 1;
       continue;
     }
     if (arg === '--vault' && next) {
@@ -101,6 +117,14 @@ function parseArgs(argv: string[]): CliOptions {
     }
     if (arg === '--dry-run') {
       options.dryRun = true;
+      continue;
+    }
+    if (arg === '--set' && next) {
+      const splitAt = next.indexOf('=');
+      if (splitAt > 0) {
+        options.patch[next.slice(0, splitAt)] = next.slice(splitAt + 1);
+      }
+      index += 1;
     }
   }
 
@@ -189,6 +213,26 @@ async function postBulkToEndpoint(options: CliOptions, assets: KnowledgeAsset[])
   return payload;
 }
 
+async function postAgentToEndpoint(options: CliOptions, payload: Record<string, unknown>): Promise<unknown> {
+  const token = options.token || process.env.DUOCLOUD_AGENT_API_TOKEN || process.env.KNOWLEDGE_AGENT_API_TOKEN;
+  if (!options.endpoint) throw new Error('Missing --endpoint.');
+  if (!token) throw new Error('Missing DUOCLOUD_AGENT_API_TOKEN, KNOWLEDGE_AGENT_API_TOKEN, or --token.');
+
+  const response = await fetch(`${options.endpoint}/api/knowledge-assets/agent`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  const result = await response.json().catch(() => null) as { success?: boolean; message?: string } | null;
+  if (!response.ok || !result?.success) {
+    throw new Error(result?.message || `Knowledge Cloud agent API failed with HTTP ${response.status}`);
+  }
+  return result;
+}
+
 async function runLocalBulk(options: CliOptions, assets: KnowledgeAsset[]): Promise<BulkResponse> {
   const token = options.token || process.env.DUOCLOUD_AGENT_API_TOKEN || process.env.KNOWLEDGE_AGENT_API_TOKEN;
   if (!token) throw new Error('Missing DUOCLOUD_AGENT_API_TOKEN, KNOWLEDGE_AGENT_API_TOKEN, or --token.');
@@ -248,8 +292,55 @@ async function runLocalExport(options: CliOptions): Promise<unknown> {
   return payload;
 }
 
+async function runLocalAgent(options: CliOptions, payload: Record<string, unknown>): Promise<unknown> {
+  const token = options.token || process.env.DUOCLOUD_AGENT_API_TOKEN || process.env.KNOWLEDGE_AGENT_API_TOKEN;
+  if (!token) throw new Error('Missing DUOCLOUD_AGENT_API_TOKEN, KNOWLEDGE_AGENT_API_TOKEN, or --token.');
+
+  const { handleKnowledgeAssetAgentRequest } = await import('../src/server/knowledgeAssetApi');
+  let statusCode = 200;
+  let result: unknown = null;
+  const req = {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: payload,
+    query: {},
+  } as Pick<Request, 'method' | 'headers' | 'body' | 'query'>;
+  const res = {
+    status(code: number) {
+      statusCode = code;
+      return this;
+    },
+    json(value: unknown) {
+      result = value;
+      return this;
+    },
+  } as Pick<Response, 'status' | 'json'>;
+
+  await handleKnowledgeAssetAgentRequest(req, res);
+  const success = result && typeof result === 'object' && (result as { success?: unknown }).success;
+  if (!success || statusCode >= 400) {
+    const message = result && typeof result === 'object' && typeof (result as { message?: unknown }).message === 'string'
+      ? (result as { message: string }).message
+      : `Knowledge Cloud local agent API failed with HTTP ${statusCode}`;
+    throw new Error(message);
+  }
+  return result;
+}
+
+async function runAgentCommand(options: CliOptions, payload: Record<string, unknown>): Promise<void> {
+  const result = options.endpoint
+    ? await postAgentToEndpoint(options, payload)
+    : await runLocalAgent(options, payload);
+  console.log(JSON.stringify(result, null, 2));
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
+
+  if (options.mode === 'health') {
+    await runAgentCommand(options, { action: 'health' });
+    return;
+  }
 
   if (options.mode === 'export') {
     if (options.endpoint) {
@@ -262,6 +353,44 @@ async function main() {
       return;
     }
     console.log(JSON.stringify(await runLocalExport(options), null, 2));
+    return;
+  }
+
+  if (options.mode === 'upsert') {
+    if (!options.file) throw new Error('Missing --file for upsert.');
+    const assets = loadAssetsFromFile(options.file);
+    if (assets.length !== 1) {
+      throw new Error('upsert expects exactly one KnowledgeAsset. Use file mode for bulk sync.');
+    }
+    await runAgentCommand(options, {
+      action: 'upsert',
+      source: options.source,
+      input: options.input,
+      asset: assets[0],
+    });
+    return;
+  }
+
+  if (options.mode === 'patch') {
+    if (!options.id) throw new Error('Missing --id for patch.');
+    await runAgentCommand(options, {
+      action: 'patch',
+      source: options.source,
+      input: options.input,
+      id: options.id,
+      patch: options.patch,
+    });
+    return;
+  }
+
+  if (options.mode === 'delete') {
+    if (!options.id) throw new Error('Missing --id for delete.');
+    await runAgentCommand(options, {
+      action: 'delete',
+      source: options.source,
+      input: options.input,
+      id: options.id,
+    });
     return;
   }
 

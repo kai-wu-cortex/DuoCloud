@@ -29,7 +29,7 @@ const KNOWLEDGE_CATEGORIES: readonly KnowledgeTableType[] = [
 
 type KnowledgeAssetSource = 'duocloud' | 'obsidian_import' | 'external_update_app' | 'agent_cli';
 type KnowledgeAssetStatus = 'active' | 'archived' | 'draft';
-type KnowledgeAssetOperation = 'create' | 'update' | 'delete' | 'bulk-import';
+type KnowledgeAssetOperation = 'create' | 'update' | 'delete' | 'bulk-import' | 'agent-upsert' | 'agent-patch';
 
 interface KnowledgeAssetActor {
   uid: string;
@@ -132,6 +132,8 @@ interface BulkRequestBody {
   source?: unknown;
   input?: unknown;
 }
+
+type AgentAction = 'health' | 'upsert' | 'patch' | 'delete' | 'bulk';
 
 export function setKnowledgeAssetApiCollectionsForTests(
   resolvers: KnowledgeAssetCollectionResolvers | null,
@@ -360,6 +362,35 @@ function getRequestServerVersion(body: Record<string, unknown>): number | null {
     : null;
 }
 
+function getAgentAction(value: unknown): AgentAction | null {
+  if (value === undefined || value === null || value === '') return 'health';
+  if (
+    value === 'health'
+    || value === 'upsert'
+    || value === 'patch'
+    || value === 'delete'
+    || value === 'bulk'
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function getKnowledgeAssetSource(value: unknown): KnowledgeAssetSource {
+  if (value === 'obsidian_import' || value === 'external_update_app' || value === 'agent_cli' || value === 'duocloud') {
+    return value;
+  }
+  return 'duocloud';
+}
+
+function parsePatchBody(value: unknown): Record<string, unknown> {
+  const body = asRecord(value);
+  if (!body) {
+    throw new KnowledgeAssetApiError(422, 'VALIDATION_ERROR', 'VALIDATION_ERROR: patch must be an object.');
+  }
+  return body;
+}
+
 function sendKnowledgeJson(
   res: Pick<Response, 'status' | 'json'>,
   statusCode: number,
@@ -462,6 +493,49 @@ export function applyKnowledgeAssetUpdate(
     serverUpdatedAt: now,
     serverCreatedBy: options.existingCreatedBy ?? actor,
     serverUpdatedBy: actor,
+  };
+}
+
+async function upsertKnowledgeAsset(
+  rawAsset: unknown,
+  options: {
+    actor: SessionUser;
+    source: KnowledgeAssetSource;
+    operation: KnowledgeAssetOperation;
+  },
+): Promise<{
+  status: 'created' | 'updated' | 'skipped';
+  asset: KnowledgeAssetDocument;
+}> {
+  const asset = ensureNormalizedKnowledgeAsset(rawAsset);
+  const collection = await getKnowledgeAssetsCollection();
+  const existing = await collection.findOne({ _id: asset.id });
+
+  if (
+    existing
+    && existing.serverStatus !== 'archived'
+    && !existing.serverDeletedAt
+    && isSameKnowledgeAssetContent(existing, asset)
+  ) {
+    return { status: 'skipped', asset: existing };
+  }
+
+  const now = new Date();
+  const next = applyKnowledgeAssetUpdate(asset, {
+    actor: options.actor,
+    now,
+    existingVersion: existing?.serverStatus === 'archived' ? 0 : existing?.serverVersion ?? 0,
+    source: options.source,
+    existingCreatedAt: existing?.serverCreatedAt,
+    existingCreatedBy: existing?.serverCreatedBy,
+  });
+
+  await collection.replaceOne({ _id: next._id }, next, { upsert: true });
+  await writeRevision(next._id, options.operation, options.actor, existing, next, now);
+
+  return {
+    status: existing && existing.serverStatus !== 'archived' && !existing.serverDeletedAt ? 'updated' : 'created',
+    asset: next,
   };
 }
 
@@ -636,10 +710,7 @@ export async function handleKnowledgeAssetBulkRequest(
 
   const actor = requireKnowledgeRole(req, ['admin']);
   const payload = (asRecord(parseBody(req.body)) ?? {}) as BulkRequestBody & Record<string, unknown>;
-  const source: KnowledgeAssetSource =
-    payload.source === 'obsidian_import' || payload.source === 'external_update_app' || payload.source === 'agent_cli'
-      ? payload.source
-      : 'duocloud';
+  const source = getKnowledgeAssetSource(payload.source);
   const input = typeof payload.input === 'string' && payload.input.trim() ? payload.input.trim() : 'bulk-request';
   const rawAssets = Array.isArray(payload.assets) ? payload.assets : null;
 
@@ -659,36 +730,14 @@ export async function handleKnowledgeAssetBulkRequest(
   };
   const insertResult = await importJobs.insertOne(job);
 
-  const collection = await getKnowledgeAssetsCollection();
-
   for (const rawAsset of rawAssets) {
     try {
-      const asset = ensureNormalizedKnowledgeAsset(rawAsset);
-      const existing = await collection.findOne({ _id: asset.id });
-
-      if (existing && existing.serverStatus !== 'archived' && !existing.serverDeletedAt && isSameKnowledgeAssetContent(existing, asset)) {
-        job.counts.skipped += 1;
-        continue;
-      }
-
-      const now = new Date();
-      const next = applyKnowledgeAssetUpdate(asset, {
+      const result = await upsertKnowledgeAsset(rawAsset, {
         actor,
-        now,
-        existingVersion: existing?.serverStatus === 'archived' ? 0 : existing?.serverVersion ?? 0,
         source,
-        existingCreatedAt: existing?.serverCreatedAt,
-        existingCreatedBy: existing?.serverCreatedBy,
+        operation: 'bulk-import',
       });
-
-      await collection.replaceOne({ _id: next._id }, next, { upsert: true });
-      await writeRevision(next._id, 'bulk-import', actor, existing, next, now);
-
-      if (existing && existing.serverStatus !== 'archived' && !existing.serverDeletedAt) {
-        job.counts.updated += 1;
-      } else {
-        job.counts.created += 1;
-      }
+      job.counts[result.status] += 1;
     } catch (error) {
       const record = asRecord(rawAsset);
       const id = typeof record?.id === 'string' ? normalizeKnowledgeAssetId(record.id) : 'unknown';
@@ -716,6 +765,156 @@ export async function handleKnowledgeAssetBulkRequest(
       errors: job.errors,
     },
   });
+}
+
+export async function handleKnowledgeAssetAgentRequest(
+  req: Pick<Request, 'method' | 'headers' | 'body' | 'query'>,
+  res: Pick<Response, 'status' | 'json'>,
+): Promise<void> {
+  const actor = requireKnowledgeRole(req, ['admin']);
+
+  if (req.method === 'GET') {
+    const collection = await getKnowledgeAssetsCollection();
+    const activeCount = (await collection.find(buildActiveFilter()).toArray()).length;
+    sendKnowledgeJson(res, 200, {
+      success: true,
+      data: {
+        ok: true,
+        service: 'duocloud-knowledge-agent-api',
+        actor: toActor(actor),
+        role: actor.role,
+        activeCount,
+        categories: KNOWLEDGE_CATEGORIES,
+      },
+    });
+    return;
+  }
+
+  if (req.method !== 'POST') {
+    throw new KnowledgeAssetApiError(405, 'METHOD_NOT_ALLOWED', 'METHOD_NOT_ALLOWED: 仅支持 GET 或 POST。');
+  }
+
+  const payload = asRecord(parseBody(req.body)) ?? {};
+  const action = getAgentAction(payload.action);
+  if (!action) {
+    throw new KnowledgeAssetApiError(422, 'VALIDATION_ERROR', 'VALIDATION_ERROR: unsupported agent action.');
+  }
+  const source = getKnowledgeAssetSource(payload.source ?? 'agent_cli');
+
+  if (action === 'health') {
+    sendKnowledgeJson(res, 200, {
+      success: true,
+      data: { ok: true, service: 'duocloud-knowledge-agent-api', actor: toActor(actor), role: actor.role },
+    });
+    return;
+  }
+
+  if (action === 'upsert') {
+    const result = await upsertKnowledgeAsset(payload.asset, {
+      actor,
+      source,
+      operation: 'agent-upsert',
+    });
+    sendKnowledgeJson(res, result.status === 'created' ? 201 : 200, {
+      success: true,
+      data: {
+        status: result.status,
+        asset: result.asset,
+      },
+    });
+    return;
+  }
+
+  if (action === 'patch') {
+    const id = typeof payload.id === 'string' ? normalizeKnowledgeAssetId(payload.id) : '';
+    if (!id) {
+      throw new KnowledgeAssetApiError(422, 'VALIDATION_ERROR', 'VALIDATION_ERROR: id is required.');
+    }
+
+    const existing = await findActiveAssetById(id);
+    if (!existing) {
+      throw new KnowledgeAssetApiError(404, 'NOT_FOUND', 'NOT_FOUND: 未找到知识卡片。');
+    }
+
+    const patch = parsePatchBody(payload.patch);
+    const merged = {
+      ...stripKnowledgeAssetMetadata(existing),
+      ...patch,
+      id,
+    };
+    const result = await upsertKnowledgeAsset(merged, {
+      actor,
+      source,
+      operation: 'agent-patch',
+    });
+    sendKnowledgeJson(res, 200, {
+      success: true,
+      data: {
+        status: result.status,
+        asset: result.asset,
+      },
+    });
+    return;
+  }
+
+  if (action === 'delete') {
+    const id = typeof payload.id === 'string' ? normalizeKnowledgeAssetId(payload.id) : '';
+    if (!id) {
+      throw new KnowledgeAssetApiError(422, 'VALIDATION_ERROR', 'VALIDATION_ERROR: id is required.');
+    }
+
+    const existing = await findActiveAssetById(id);
+    if (!existing) {
+      throw new KnowledgeAssetApiError(404, 'NOT_FOUND', 'NOT_FOUND: 未找到知识卡片。');
+    }
+
+    const now = new Date();
+    const archived: KnowledgeAssetDocument = {
+      ...existing,
+      serverStatus: 'archived',
+      serverDeletedAt: now,
+      serverUpdatedAt: now,
+      serverUpdatedBy: toActor(actor),
+      lastUpdated: formatDateOnly(now),
+      serverVersion: existing.serverVersion + 1,
+    };
+
+    const collection = await getKnowledgeAssetsCollection();
+    await collection.replaceOne({ _id: id }, archived);
+    await writeRevision(id, 'delete', actor, existing, archived, now);
+    sendKnowledgeJson(res, 200, { success: true, data: { status: 'deleted', asset: archived } });
+    return;
+  }
+
+  if (action === 'bulk') {
+    const rawAssets = Array.isArray(payload.assets) ? payload.assets : null;
+    if (!rawAssets) {
+      throw new KnowledgeAssetApiError(422, 'VALIDATION_ERROR', 'VALIDATION_ERROR: assets must be an array.');
+    }
+
+    const counts = { created: 0, updated: 0, skipped: 0, failed: 0 };
+    const errors: Array<{ id: string; message: string }> = [];
+    for (const rawAsset of rawAssets) {
+      try {
+        const result = await upsertKnowledgeAsset(rawAsset, {
+          actor,
+          source,
+          operation: 'agent-upsert',
+        });
+        counts[result.status] += 1;
+      } catch (error) {
+        const record = asRecord(rawAsset);
+        const id = typeof record?.id === 'string' ? normalizeKnowledgeAssetId(record.id) : 'unknown';
+        counts.failed += 1;
+        errors.push({ id, message: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    sendKnowledgeJson(res, 200, { success: true, data: { counts, errors } });
+    return;
+  }
+
+  throw new KnowledgeAssetApiError(422, 'VALIDATION_ERROR', 'VALIDATION_ERROR: unsupported agent action.');
 }
 
 export async function handleKnowledgeAssetExportRequest(

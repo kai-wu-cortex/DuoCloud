@@ -5,6 +5,7 @@ import type { Filter } from 'mongodb';
 import type { KnowledgeAsset } from '../types';
 import {
   applyKnowledgeAssetUpdate,
+  handleKnowledgeAssetAgentRequest,
   handleKnowledgeAssetBulkRequest,
   handleKnowledgeAssetDocumentRequest,
   handleKnowledgeAssetExportRequest,
@@ -603,4 +604,73 @@ test('agent bearer token rejects invalid credentials', async () => {
 
   assert.equal(state.statusCode, 401);
   assert.equal(getErrorCode(state.body), 'UNAUTHORIZED');
+});
+
+test('agent endpoint supports health, upsert, patch, and delete without browser session', async () => {
+  process.env.DUOCLOUD_AGENT_API_TOKEN = 'agent-secret';
+  const { assets, revisions } = setupCollections();
+
+  const healthReq = createRequest({
+    method: 'GET',
+    headers: createAgentHeaders(),
+  });
+  const healthRes = createMockResponse();
+  await handleKnowledgeAssetAgentRequest(healthReq, healthRes.res);
+  assert.equal(healthRes.state.statusCode, 200);
+  assert.equal((getSuccessData<{ ok: boolean }>(healthRes.state.body)).ok, true);
+
+  const upsertReq = createRequest({
+    method: 'POST',
+    headers: createAgentHeaders(),
+    body: {
+      action: 'upsert',
+      source: 'agent_cli',
+      asset: governanceAsset,
+    },
+  });
+  const upsertRes = createMockResponse();
+  await handleKnowledgeAssetAgentRequest(upsertReq, upsertRes.res);
+  assert.equal(upsertRes.state.statusCode, 201);
+  const upserted = getSuccessData<{ status: string; asset: KnowledgeAssetDocument }>(upsertRes.state.body);
+  assert.equal(upserted.status, 'created');
+  assert.equal(upserted.asset.serverSource, 'agent_cli');
+
+  const patchReq = createRequest({
+    method: 'POST',
+    headers: createAgentHeaders(),
+    body: {
+      action: 'patch',
+      source: 'external_update_app',
+      id: governanceAsset.id,
+      patch: {
+        title: '治理规则 Agent Patch',
+        tags: ['治理', 'Agent更新'],
+      },
+    },
+  });
+  const patchRes = createMockResponse();
+  await handleKnowledgeAssetAgentRequest(patchReq, patchRes.res);
+  assert.equal(patchRes.state.statusCode, 200);
+  const patched = getSuccessData<{ status: string; asset: KnowledgeAssetDocument }>(patchRes.state.body);
+  assert.equal(patched.status, 'updated');
+  assert.equal(patched.asset.title, '治理规则 Agent Patch');
+  assert.deepEqual(patched.asset.tags, ['治理', 'Agent更新']);
+  assert.equal(patched.asset.serverVersion, 2);
+
+  const deleteReq = createRequest({
+    method: 'POST',
+    headers: createAgentHeaders(),
+    body: {
+      action: 'delete',
+      id: governanceAsset.id,
+    },
+  });
+  const deleteRes = createMockResponse();
+  await handleKnowledgeAssetAgentRequest(deleteReq, deleteRes.res);
+  assert.equal(deleteRes.state.statusCode, 200);
+  const deleted = getSuccessData<{ status: string; asset: KnowledgeAssetDocument }>(deleteRes.state.body);
+  assert.equal(deleted.status, 'deleted');
+  assert.equal(deleted.asset.serverStatus, 'archived');
+  assert.equal(assets.documents[0].serverStatus, 'archived');
+  assert.deepEqual(revisions.documents.map(entry => entry.operation), ['agent-upsert', 'agent-patch', 'delete']);
 });

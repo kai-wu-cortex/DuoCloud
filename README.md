@@ -46,6 +46,8 @@ Supported Knowledge Cloud endpoints:
 - `GET /api/knowledge-assets` - list active knowledge cards.
 - `GET /api/knowledge-assets/export` - export active knowledge cards.
 - `POST /api/knowledge-assets/bulk` - bulk upsert knowledge cards from Obsidian, an external update app, or an agent CLI.
+- `GET /api/knowledge-assets/agent` - verify bearer-token agent access and return API health metadata.
+- `POST /api/knowledge-assets/agent` - agent-friendly card operations that do not require a browser session.
 - `POST /api/knowledge-assets` - create one card.
 - `PUT /api/knowledge-assets/:id` - update one card with `serverVersion`.
 - `DELETE /api/knowledge-assets/:id` - archive one card with `serverVersion`.
@@ -61,6 +63,46 @@ Bulk upsert payload:
 ```
 
 `source` can be `obsidian_import`, `external_update_app`, `agent_cli`, or `duocloud`.
+
+Agent operation payloads:
+
+```json
+{ "action": "health" }
+```
+
+```json
+{
+  "action": "upsert",
+  "source": "agent_cli",
+  "input": "manual-agent-update-2026-07-02",
+  "asset": {
+    "id": "OBS-EXAMPLE",
+    "category": "knowledge_governance",
+    "title": "示例知识卡",
+    "tags": ["Obsidian同步"],
+    "lastUpdated": "2026-07-02",
+    "author": "HotFoil Agent",
+    "content": "支持 Markdown/HTML 富文本内容。"
+  }
+}
+```
+
+```json
+{
+  "action": "patch",
+  "id": "OBS-EXAMPLE",
+  "patch": {
+    "title": "更新后的标题",
+    "tags": ["人工可读", "Obsidian同步"]
+  }
+}
+```
+
+```json
+{ "action": "delete", "id": "OBS-EXAMPLE" }
+```
+
+The agent endpoint is intended for the local `hotfoil-knowledge-ingestion` skill, automation agents, and a separate database update app. It uses revision logging and server-managed versions internally, so callers do not need to fetch and submit `serverVersion` for patch/delete operations.
 
 ## HotFoil Skill Website Sync
 
@@ -102,3 +144,23 @@ Export for audit:
 ```bash
 npm run knowledge:agent -- export
 ```
+
+Agent/CLI card operations:
+
+```bash
+npm run knowledge:agent -- health
+
+npm run knowledge:agent -- upsert \
+  --file ./one-knowledge-asset.json \
+  --source agent_cli \
+  --input "agent-single-card"
+
+npm run knowledge:agent -- patch \
+  --id OBS-EXAMPLE \
+  --set title="更新后的标题" \
+  --set author="HotFoil Agent"
+
+npm run knowledge:agent -- delete --id OBS-EXAMPLE
+```
+
+For a deployed Vercel site, add `--endpoint "https://your-duocloud-domain.vercel.app"` and either set `DUOCLOUD_AGENT_API_TOKEN` locally or pass `--token "$DUOCLOUD_AGENT_API_TOKEN"`.
