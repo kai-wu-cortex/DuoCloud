@@ -604,8 +604,8 @@ export default function App() {
             <Workflow className="w-6 h-6" />
           </div>
           <div>
-            <p className="text-lg font-bold text-primary">Double Cloud</p>
-            <p className="text-sm text-on-surface-variant">正在验证知识云登入状态...</p>
+            <p className="text-lg font-bold text-primary">PINTE 品特</p>
+            <p className="text-sm text-on-surface-variant">正在验证双云平台登入状态...</p>
           </div>
         </div>
       </div>
@@ -641,8 +641,8 @@ export default function App() {
                 <Workflow className="w-5 h-5" />
               </div>
               <div className={isSidebarCollapsed ? 'md:hidden' : 'block'}>
-                <div className="text-lg font-bold text-primary tracking-tight leading-none">Double Cloud</div>
-                <div className="text-[11px] font-semibold text-on-surface-variant tracking-wider uppercase">Industrial OS</div>
+                <div className="text-lg font-bold text-primary tracking-tight leading-none">PINTE 品特</div>
+                <div className="text-[11px] font-semibold text-on-surface-variant tracking-wider uppercase">烫金膜双云平台</div>
               </div>
             </div>
             {/* Close Mobile Menu */}
@@ -739,7 +739,7 @@ export default function App() {
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse" />
               <span>实时双云引擎正常运转</span>
             </div>
-            <p className="mt-1">© 2026 Double Cloud OS</p>
+            <p className="mt-1">© 2026 PINTE 品特双云平台</p>
           </div>
         </div>
       </aside>
