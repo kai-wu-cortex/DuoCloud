@@ -4,7 +4,7 @@ import {
   Search, BookOpen, Plus, Tag, Calendar, User, Filter, Sliders, DollarSign, ShieldAlert, Truck, MessageSquare, Layers, X, PlusCircle, CheckCircle2,
   Box, Puzzle, BookText, AlertTriangle, HelpCircle, MoreHorizontal, FileText, Video,
   LayoutGrid, List as ListIcon, Folder, Sparkles, Pencil,
-  Bold, Italic, Underline, Link, Image as ImageIcon, Paperclip, ExternalLink, Upload, Download, Code2, Eye, Maximize2, Save, RotateCcw, Trash2
+  Bold, Italic, Underline, Link, Image as ImageIcon, Paperclip, ExternalLink, Upload, Download, Code2, Eye, Maximize2, Save, RotateCcw, Trash2, ChevronRight
 } from 'lucide-react';
 import { KnowledgeAsset, KnowledgeTableType } from '../types';
 import { formatLocalDate } from '../lib/appState';
@@ -56,6 +56,7 @@ const CATEGORY_MAP: Record<KnowledgeTableType, { label: string; enLabel: string;
 
 const GRID_BATCH_SIZE = 180;
 const LIST_BATCH_SIZE = 120;
+type KnowledgeScope = 'public' | 'private';
 
 interface DirectoryTreeNode {
   name: string;
@@ -124,6 +125,14 @@ function directoryMatches(asset: KnowledgeAsset, activeDirectoryPath: string) {
   if (!activeDirectoryPath) return true;
   const directoryPath = getAssetDirectoryPath(asset);
   return directoryPath === activeDirectoryPath || directoryPath.startsWith(`${activeDirectoryPath}/`);
+}
+
+function isPrivateKnowledgeAsset(asset: KnowledgeAsset) {
+  return asset.access === 'private';
+}
+
+function isOwnedByUser(asset: KnowledgeAsset, user: AuthUser) {
+  return asset.ownerUid === user.uid || asset.ownerUsername === user.username;
 }
 
 function buildAssetSearchText(asset: KnowledgeAsset) {
@@ -741,6 +750,10 @@ export default function KnowledgeCloud({
   onRefreshAssets,
   isAppSidebarCollapsed = false,
 }: KnowledgeCloudProps) {
+  const [knowledgeScope, setKnowledgeScope] = useState<KnowledgeScope>('public');
+  const [isPublicCategoryOpen, setIsPublicCategoryOpen] = useState(true);
+  const [isPrivateCategoryOpen, setIsPrivateCategoryOpen] = useState(false);
+  const [isDirectoryOpen, setIsDirectoryOpen] = useState(true);
   const [activeCategory, setActiveCategory] = useState<KnowledgeTableType | 'all'>('all');
   const [activeTagFilter, setActiveTagFilter] = useState('all');
   const [activeDirectoryPath, setActiveDirectoryPath] = useState('');
@@ -772,6 +785,12 @@ export default function KnowledgeCloud({
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const canEdit = !isOffline && (currentUser.role === 'editor' || currentUser.role === 'admin');
   const canAdmin = !isOffline && currentUser.role === 'admin';
+  const publicAssets = useMemo(() => assets.filter(asset => !isPrivateKnowledgeAsset(asset)), [assets]);
+  const privateAssets = useMemo(
+    () => assets.filter(asset => isPrivateKnowledgeAsset(asset) && isOwnedByUser(asset, currentUser)),
+    [assets, currentUser],
+  );
+  const scopedAssets = knowledgeScope === 'private' ? privateAssets : publicAssets;
 
   // New Asset Form State
   const [newTitle, setNewTitle] = useState('');
@@ -870,11 +889,17 @@ export default function KnowledgeCloud({
       tags: tags.length > 0 ? tags : ['自定义'],
       fields: dynamicFields,
     });
+    const scopedDraft = {
+      ...draft,
+      access: editingAsset?.access ?? (knowledgeScope === 'private' ? 'private' : 'public'),
+      ownerUid: editingAsset?.ownerUid ?? (knowledgeScope === 'private' ? currentUser.uid : undefined),
+      ownerUsername: editingAsset?.ownerUsername ?? (knowledgeScope === 'private' ? currentUser.username : undefined),
+    } as Omit<KnowledgeAsset, 'id' | 'lastUpdated'>;
 
     if (editingAsset) {
       const updatedAsset = {
         ...editingAsset,
-        ...draft,
+        ...scopedDraft,
         id: editingAsset.id,
         lastUpdated: formatLocalDate(),
       } as KnowledgeAsset;
@@ -889,7 +914,7 @@ export default function KnowledgeCloud({
       }
     } else {
       try {
-        await onAddAsset(draft);
+        await onAddAsset(scopedDraft);
         showToast('知识卡片已同步创建');
       } catch (error) {
         console.error('Failed to create knowledge asset', error);
@@ -933,21 +958,29 @@ export default function KnowledgeCloud({
   const selectedAssetIdSet = useMemo(() => new Set(selectedAssetIds), [selectedAssetIds]);
 
   const assetSearchRecords = useMemo(
-    () => assets.map(asset => ({
+    () => scopedAssets.map(asset => ({
       asset,
       directoryPath: getAssetDirectoryPath(asset),
       searchText: buildAssetSearchText(asset),
     })),
-    [assets],
+    [scopedAssets],
   );
 
-  const categoryCounts = useMemo(() => {
+  const publicCategoryCounts = useMemo(() => {
     const counts = new Map<KnowledgeTableType, number>();
-    for (const asset of assets) {
+    for (const asset of publicAssets) {
       counts.set(asset.category, (counts.get(asset.category) || 0) + 1);
     }
     return counts;
-  }, [assets]);
+  }, [publicAssets]);
+
+  const privateCategoryCounts = useMemo(() => {
+    const counts = new Map<KnowledgeTableType, number>();
+    for (const asset of privateAssets) {
+      counts.set(asset.category, (counts.get(asset.category) || 0) + 1);
+    }
+    return counts;
+  }, [privateAssets]);
 
   const baseFilteredAssets = useMemo(() => {
     const query = deferredSearchQuery.trim().toLowerCase();
@@ -1446,11 +1479,11 @@ export default function KnowledgeCloud({
   };
 
   const categoryTitle = activeCategory === 'all' 
-    ? 'Derivation Libraries' 
+    ? (knowledgeScope === 'private' ? 'Private Knowledge Libraries' : 'Derivation Libraries')
     : (CATEGORY_MAP[activeCategory]?.enLabel || 'Derivation Libraries');
   const directoryTreeAssets = useMemo(
-    () => activeCategory === 'all' ? assets : assets.filter(asset => asset.category === activeCategory),
-    [activeCategory, assets],
+    () => activeCategory === 'all' ? scopedAssets : scopedAssets.filter(asset => asset.category === activeCategory),
+    [activeCategory, scopedAssets],
   );
   const directoryTree = useMemo(() => buildDirectoryTree(directoryTreeAssets), [directoryTreeAssets]);
   const activeDirectoryLabel = activeDirectoryPath ? activeDirectoryPath.split('/').at(-1) : '';
@@ -1574,62 +1607,151 @@ export default function KnowledgeCloud({
         isAppSidebarCollapsed ? 'lg:left-22' : 'lg:left-70'
       }`}>
         <div className="bg-white border border-[#E2E4E9] rounded-2xl p-4 space-y-1 shadow-xs shrink-0">
-          <h3 className="text-xs font-black text-[#0D0B3D] tracking-wider uppercase mb-3 flex items-center gap-2 font-sans px-2">
-            <Filter className="w-3.5 h-3.5 text-[#5F52EE]" />
-            知识云业务分类
-          </h3>
-          
           <button
-            onClick={() => {
-              setActiveCategory('all');
-              setActiveDirectoryPath('');
-            }}
-            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-extrabold transition cursor-pointer ${
-              activeCategory === 'all' 
-                ? 'bg-[#5F52EE] text-white shadow-sm' 
-                : 'text-[#0D0B3D] hover:bg-slate-50 hover:text-[#5F52EE]'
-            }`}
+            type="button"
+            onClick={() => setIsPublicCategoryOpen(value => !value)}
+            className="w-full text-xs font-black text-[#0D0B3D] tracking-wider uppercase mb-3 flex items-center justify-between gap-2 font-sans px-2 cursor-pointer hover:text-[#5F52EE] transition"
+            aria-expanded={isPublicCategoryOpen}
           >
-            <span className="flex items-center gap-2">
-              <BookOpen className="w-4 h-4 shrink-0" />
-              全部数据 (All)
+            <span className="flex items-center gap-2 min-w-0">
+              <Filter className="w-3.5 h-3.5 text-[#5F52EE]" />
+              <span className="truncate">公共知识云业务分类</span>
             </span>
-            {renderCountBadge(assets.length, activeCategory === 'all')}
+            <ChevronRight className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isPublicCategoryOpen ? 'rotate-90' : ''}`} />
           </button>
 
-          {(Object.keys(CATEGORY_MAP) as KnowledgeTableType[]).map((cat) => {
-            const count = categoryCounts.get(cat) || 0;
-            const item = CATEGORY_MAP[cat];
-            const isSelected = activeCategory === cat;
-            return (
+          {isPublicCategoryOpen && (
+            <>
               <button
-                key={cat}
                 onClick={() => {
-                  setActiveCategory(cat);
+                  setKnowledgeScope('public');
+                  setActiveCategory('all');
                   setActiveDirectoryPath('');
+                  setActiveTagFilter('all');
                 }}
-                className={`w-full flex items-center justify-between px-3.5 py-2 transition cursor-pointer rounded-xl text-xs font-extrabold ${
-                  isSelected 
-                    ? 'bg-[#5F52EE] text-white shadow-sm' 
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-extrabold transition cursor-pointer ${
+                  knowledgeScope === 'public' && activeCategory === 'all'
+                    ? 'bg-[#5F52EE] text-white shadow-sm'
                     : 'text-[#0D0B3D] hover:bg-slate-50 hover:text-[#5F52EE]'
                 }`}
               >
-                <span className="flex items-center gap-2 truncate">
-                  <span className={`${isSelected ? 'text-white' : 'text-[#5F52EE]'}`}>{item.icon}</span>
-                  <span className="truncate text-left">{item.label}</span>
+                <span className="flex items-center gap-2">
+                  <BookOpen className="w-4 h-4 shrink-0" />
+                  全部数据 (All)
                 </span>
-                {renderCountBadge(count, isSelected)}
+                {renderCountBadge(publicAssets.length, knowledgeScope === 'public' && activeCategory === 'all')}
               </button>
-            );
-          })}
+
+              {(Object.keys(CATEGORY_MAP) as KnowledgeTableType[]).map((cat) => {
+                const count = publicCategoryCounts.get(cat) || 0;
+                const item = CATEGORY_MAP[cat];
+                const isSelected = knowledgeScope === 'public' && activeCategory === cat;
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => {
+                      setKnowledgeScope('public');
+                      setActiveCategory(cat);
+                      setActiveDirectoryPath('');
+                      setActiveTagFilter('all');
+                    }}
+                    className={`w-full flex items-center justify-between px-3.5 py-2 transition cursor-pointer rounded-xl text-xs font-extrabold ${
+                      isSelected
+                        ? 'bg-[#5F52EE] text-white shadow-sm'
+                        : 'text-[#0D0B3D] hover:bg-slate-50 hover:text-[#5F52EE]'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 truncate">
+                      <span className={`${isSelected ? 'text-white' : 'text-[#5F52EE]'}`}>{item.icon}</span>
+                      <span className="truncate text-left">{item.label}</span>
+                    </span>
+                    {renderCountBadge(count, isSelected)}
+                  </button>
+                );
+              })}
+            </>
+          )}
+        </div>
+
+        <div className="bg-white border border-[#E2E4E9] rounded-2xl p-4 space-y-1 shadow-xs shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsPrivateCategoryOpen(value => !value)}
+            className="w-full text-xs font-black text-[#0D0B3D] tracking-wider uppercase mb-3 flex items-center justify-between gap-2 font-sans px-2 cursor-pointer hover:text-[#5F52EE] transition"
+            aria-expanded={isPrivateCategoryOpen}
+          >
+            <span className="flex items-center gap-2 min-w-0">
+              <ShieldAlert className="w-3.5 h-3.5 text-[#5F52EE]" />
+              <span className="truncate">私人知识云业务分类</span>
+            </span>
+            <ChevronRight className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isPrivateCategoryOpen ? 'rotate-90' : ''}`} />
+          </button>
+
+          {isPrivateCategoryOpen && (
+            <>
+              <button
+                onClick={() => {
+                  setKnowledgeScope('private');
+                  setActiveCategory('all');
+                  setActiveDirectoryPath('');
+                  setActiveTagFilter('all');
+                }}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-extrabold transition cursor-pointer ${
+                  knowledgeScope === 'private' && activeCategory === 'all'
+                    ? 'bg-[#5F52EE] text-white shadow-sm'
+                    : 'text-[#0D0B3D] hover:bg-slate-50 hover:text-[#5F52EE]'
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <BookOpen className="w-4 h-4 shrink-0" />
+                  我的全部数据
+                </span>
+                {renderCountBadge(privateAssets.length, knowledgeScope === 'private' && activeCategory === 'all')}
+              </button>
+
+              {(Object.keys(CATEGORY_MAP) as KnowledgeTableType[]).map((cat) => {
+                const count = privateCategoryCounts.get(cat) || 0;
+                const item = CATEGORY_MAP[cat];
+                const isSelected = knowledgeScope === 'private' && activeCategory === cat;
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => {
+                      setKnowledgeScope('private');
+                      setActiveCategory(cat);
+                      setActiveDirectoryPath('');
+                      setActiveTagFilter('all');
+                    }}
+                    className={`w-full flex items-center justify-between px-3.5 py-2 transition cursor-pointer rounded-xl text-xs font-extrabold ${
+                      isSelected
+                        ? 'bg-[#5F52EE] text-white shadow-sm'
+                        : 'text-[#0D0B3D] hover:bg-slate-50 hover:text-[#5F52EE]'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 truncate">
+                      <span className={`${isSelected ? 'text-white' : 'text-[#5F52EE]'}`}>{item.icon}</span>
+                      <span className="truncate text-left">{item.label}</span>
+                    </span>
+                    {renderCountBadge(count, isSelected)}
+                  </button>
+                );
+              })}
+            </>
+          )}
         </div>
 
         <div className="bg-white border border-[#E2E4E9] rounded-2xl p-4 shadow-xs shrink-0">
           <div className="flex items-center justify-between mb-3 px-2">
-            <h3 className="text-xs font-black text-[#0D0B3D] tracking-wider uppercase flex items-center gap-2 font-sans">
+            <button
+              type="button"
+              onClick={() => setIsDirectoryOpen(value => !value)}
+              className="text-xs font-black text-[#0D0B3D] tracking-wider uppercase flex items-center gap-2 font-sans cursor-pointer hover:text-[#5F52EE] transition min-w-0"
+              aria-expanded={isDirectoryOpen}
+            >
+              <ChevronRight className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isDirectoryOpen ? 'rotate-90' : ''}`} />
               <Folder className="w-3.5 h-3.5 text-[#5F52EE]" />
-              资料目录
-            </h3>
+              <span className="truncate">公共资料目录</span>
+            </button>
             {activeDirectoryPath && (
               <button
                 type="button"
@@ -1640,18 +1762,20 @@ export default function KnowledgeCloud({
               </button>
             )}
           </div>
-          {showSyncSkeleton ? (
-            <div className="space-y-2 px-2 py-3" aria-hidden="true">
-              <SkeletonLine className="h-4 w-32" />
-              <SkeletonLine className="h-4 w-44 ml-4" />
-              <SkeletonLine className="h-4 w-36 ml-8" />
-            </div>
-          ) : directoryTree.length > 0 ? (
-            renderDirectoryNodes(directoryTree)
-          ) : (
-            <div className="px-2 py-3 text-[11px] font-bold text-slate-400">
-              当前数据暂无目录层级
-            </div>
+          {isDirectoryOpen && (
+            showSyncSkeleton ? (
+              <div className="space-y-2 px-2 py-3" aria-hidden="true">
+                <SkeletonLine className="h-4 w-32" />
+                <SkeletonLine className="h-4 w-44 ml-4" />
+                <SkeletonLine className="h-4 w-36 ml-8" />
+              </div>
+            ) : directoryTree.length > 0 ? (
+              renderDirectoryNodes(directoryTree)
+            ) : (
+              <div className="px-2 py-3 text-[11px] font-bold text-slate-400">
+                当前数据暂无目录层级
+              </div>
+            )
           )}
         </div>
       </div>
@@ -1928,19 +2052,32 @@ export default function KnowledgeCloud({
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative block lg:hidden w-full sm:w-64">
               <select
-                value={activeCategory}
+                value={`${knowledgeScope}:${activeCategory}`}
                 onChange={(e) => {
-                  setActiveCategory(e.target.value as any);
+                  const [nextScope, nextCategory] = e.target.value.split(':') as [KnowledgeScope, KnowledgeTableType | 'all'];
+                  setKnowledgeScope(nextScope);
+                  setActiveCategory(nextCategory);
                   setActiveDirectoryPath('');
+                  setActiveTagFilter('all');
                 }}
                 className="w-full bg-white border border-[#5F52EE]/60 rounded-xl pl-4 pr-10 py-2.5 text-sm font-extrabold text-[#5F52EE] outline-none appearance-none shadow-sm cursor-pointer hover:border-[#4E41DC] transition"
               >
-                <option value="all">全部数据 (All)</option>
-                {(Object.keys(CATEGORY_MAP) as KnowledgeTableType[]).map((cat) => (
-                  <option key={cat} value={cat}>
-                    {CATEGORY_MAP[cat].label}
-                  </option>
-                ))}
+                <optgroup label="公共知识云业务分类">
+                  <option value="public:all">公共全部数据 (All)</option>
+                  {(Object.keys(CATEGORY_MAP) as KnowledgeTableType[]).map((cat) => (
+                    <option key={`public-${cat}`} value={`public:${cat}`}>
+                      {CATEGORY_MAP[cat].label}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="私人知识云业务分类">
+                  <option value="private:all">我的全部数据</option>
+                  {(Object.keys(CATEGORY_MAP) as KnowledgeTableType[]).map((cat) => (
+                    <option key={`private-${cat}`} value={`private:${cat}`}>
+                      {CATEGORY_MAP[cat].label}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
               <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-[#5F52EE]">
                 <svg className="fill-current h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">

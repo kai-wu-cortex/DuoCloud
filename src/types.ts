@@ -23,6 +23,9 @@ export interface KnowledgeAssetBase {
   lastUpdated: string;
   author: string;
   content: string;
+  access?: 'public' | 'private';
+  ownerUid?: string;
+  ownerUsername?: string;
   sourcePath?: string;
   directoryLevel1?: string;
   directoryLevel2?: string;
