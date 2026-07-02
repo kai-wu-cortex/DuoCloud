@@ -15,7 +15,9 @@ import {
   ChevronRight,
   LogOut,
   MessageCircle,
-  UserRound
+  UserRound,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 
 // Shared data and types
@@ -79,6 +81,8 @@ type DifyWindow = Window & {
 
 function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boolean }) {
   const [isOpening, setIsOpening] = useState(false);
+  const [isDifyOpen, setIsDifyOpen] = useState(false);
+  const [isDifyFullscreen, setIsDifyFullscreen] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -109,8 +113,31 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
         transform: scale(0.01) !important;
       }
       #dify-chatbot-bubble-window {
-        width: 24rem !important;
-        height: 40rem !important;
+        position: fixed !important;
+        right: max(1rem, env(safe-area-inset-right)) !important;
+        bottom: max(1rem, env(safe-area-inset-bottom)) !important;
+        width: min(28rem, calc(100vw - 2rem)) !important;
+        height: min(44rem, calc(100vh - 2rem)) !important;
+        max-width: calc(100vw - 2rem) !important;
+        max-height: calc(100vh - 2rem) !important;
+        border: 1px solid rgba(125, 178, 255, 0.75) !important;
+        border-radius: 24px !important;
+        overflow: hidden !important;
+        background: rgba(255, 255, 255, 0.68) !important;
+        backdrop-filter: blur(18px) saturate(1.25) !important;
+        -webkit-backdrop-filter: blur(18px) saturate(1.25) !important;
+        box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24), 0 0 0 1px rgba(255, 255, 255, 0.35) inset !important;
+        z-index: 2147483000 !important;
+        transition: width 180ms ease, height 180ms ease, inset 180ms ease, border-radius 180ms ease, box-shadow 180ms ease !important;
+      }
+      html.dify-chatbot-fullscreen #dify-chatbot-bubble-window {
+        inset: max(0.75rem, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right)) max(0.75rem, env(safe-area-inset-bottom)) max(0.75rem, env(safe-area-inset-left)) !important;
+        width: auto !important;
+        height: auto !important;
+        max-width: none !important;
+        max-height: none !important;
+        border-radius: 18px !important;
+        box-shadow: 0 30px 90px rgba(15, 23, 42, 0.32), 0 0 0 1px rgba(255, 255, 255, 0.38) inset !important;
       }
     `;
 
@@ -125,14 +152,55 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
     document.body.appendChild(script);
   }, []);
 
+  useEffect(() => {
+    document.documentElement.classList.toggle('dify-chatbot-fullscreen', isDifyFullscreen);
+    return () => document.documentElement.classList.remove('dify-chatbot-fullscreen');
+  }, [isDifyFullscreen]);
+
+  useEffect(() => {
+    if (!isDifyOpen) return undefined;
+
+    const intervalId = window.setInterval(() => {
+      const bubbleWindow = document.getElementById('dify-chatbot-bubble-window') as HTMLElement | null;
+      if (!bubbleWindow) {
+        setIsDifyOpen(false);
+        setIsDifyFullscreen(false);
+        return;
+      }
+
+      const rect = bubbleWindow.getBoundingClientRect();
+      const styles = window.getComputedStyle(bubbleWindow);
+      const isVisible = styles.display !== 'none' && styles.visibility !== 'hidden' && rect.width > 20 && rect.height > 20;
+      if (!isVisible) {
+        setIsDifyOpen(false);
+        setIsDifyFullscreen(false);
+      }
+    }, 600);
+
+    return () => window.clearInterval(intervalId);
+  }, [isDifyOpen]);
+
   const openDifyChatbot = () => {
     let attempts = 0;
     setIsOpening(true);
 
     const clickWhenReady = () => {
+      const bubbleWindow = document.getElementById('dify-chatbot-bubble-window') as HTMLElement | null;
+      if (bubbleWindow) {
+        const rect = bubbleWindow.getBoundingClientRect();
+        const styles = window.getComputedStyle(bubbleWindow);
+        const isVisible = styles.display !== 'none' && styles.visibility !== 'hidden' && rect.width > 20 && rect.height > 20;
+        if (isVisible) {
+          setIsDifyOpen(true);
+          setIsOpening(false);
+          return;
+        }
+      }
+
       const bubbleButton = document.getElementById('dify-chatbot-bubble-button') as HTMLElement | null;
       if (bubbleButton) {
         bubbleButton.click();
+        setIsDifyOpen(true);
         setIsOpening(false);
         return;
       }
@@ -150,23 +218,41 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
   };
 
   return (
-    <button
-      type="button"
-      onClick={openDifyChatbot}
-      className={`w-full flex items-center rounded-xl border border-primary/15 bg-primary/10 text-primary hover:bg-primary hover:text-white shadow-sm shadow-primary/5 transition ${
-        isSidebarCollapsed ? 'md:justify-center md:p-1.5 p-2.5' : 'gap-3 p-2.5'
-      }`}
-      title={isSidebarCollapsed ? 'Dify AI 助手' : undefined}
-      id="dify-sidebar-launcher"
-    >
-      <div className="w-8 h-8 rounded-lg bg-white/70 flex items-center justify-center text-primary shrink-0">
-        <MessageCircle className="w-4 h-4" />
-      </div>
-      <div className={`min-w-0 text-left ${isSidebarCollapsed ? 'md:hidden' : 'block'}`}>
-        <p className="text-[11px] font-bold leading-tight">{isOpening ? '正在打开 Dify...' : 'Dify AI 助手'}</p>
-        <p className="text-[10px] font-mono opacity-75 leading-tight">Knowledge Copilot</p>
-      </div>
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={openDifyChatbot}
+        className={`w-full flex items-center rounded-xl border border-primary/15 bg-primary/10 text-primary hover:bg-primary hover:text-white shadow-sm shadow-primary/5 transition ${
+          isSidebarCollapsed ? 'md:justify-center md:p-1.5 p-2.5' : 'gap-3 p-2.5'
+        }`}
+        title={isSidebarCollapsed ? 'Dify AI 助手' : undefined}
+        id="dify-sidebar-launcher"
+      >
+        <div className="w-8 h-8 rounded-lg bg-white/70 flex items-center justify-center text-primary shrink-0">
+          <MessageCircle className="w-4 h-4" />
+        </div>
+        <div className={`min-w-0 text-left ${isSidebarCollapsed ? 'md:hidden' : 'block'}`}>
+          <p className="text-[11px] font-bold leading-tight">{isOpening ? '正在打开 Dify...' : 'Dify AI 助手'}</p>
+          <p className="text-[10px] font-mono opacity-75 leading-tight">Knowledge Copilot</p>
+        </div>
+      </button>
+
+      {isDifyOpen && (
+        <button
+          type="button"
+          onClick={() => setIsDifyFullscreen(value => !value)}
+          className={`fixed z-[2147483001] w-9 h-9 rounded-lg bg-white/90 border border-white/60 text-[#1C64F2] shadow-lg shadow-slate-900/15 backdrop-blur-md flex items-center justify-center hover:bg-white transition ${
+            isDifyFullscreen
+              ? 'right-7 top-7'
+              : 'right-[calc(max(1rem,env(safe-area-inset-right))+0.75rem)] bottom-[calc(min(44rem,calc(100vh-2rem))-2.75rem)]'
+          }`}
+          title={isDifyFullscreen ? '退出全屏' : '全屏显示'}
+          aria-label={isDifyFullscreen ? '退出全屏' : '全屏显示'}
+        >
+          {isDifyFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+        </button>
+      )}
+    </>
   );
 }
 
