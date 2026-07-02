@@ -544,10 +544,11 @@ test('bulk import logs import jobs, skips unchanged assets, and writes revisions
     counts: { created: number; updated: number; skipped: number; failed: number };
     errors: Array<{ id: string; message: string }>;
   }>(state.body);
-  assert.deepEqual(data.counts, { created: 2, updated: 1, skipped: 1, failed: 0 });
+  assert.deepEqual(data.counts, { created: 2, updated: 0, skipped: 2, failed: 0 });
   assert.equal(data.errors.length, 0);
-  assert.equal(revisions.documents.length, 3);
-  assert.deepEqual(revisions.documents.map(entry => entry.operation), ['bulk-import', 'bulk-import', 'bulk-import']);
+  assert.equal(revisions.documents.length, 2);
+  assert.deepEqual(revisions.documents.map(entry => entry.operation), ['bulk-import', 'bulk-import']);
+  assert.equal(assets.documents.find(asset => asset._id === 'KA-001')?.title, baseTagAsset.title);
   assert.equal(assets.documents.find(asset => asset._id === 'KA-001')?.access, 'public');
   assert.equal(assets.documents.find(asset => asset._id === 'PM-001')?.access, 'public');
   assert.equal(importJobs.documents.length, 1);

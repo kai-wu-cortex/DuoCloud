@@ -544,6 +544,16 @@ async function upsertKnowledgeAsset(
   const rawNormalizedAsset = ensureNormalizedKnowledgeAsset(rawAsset);
   const collection = await getKnowledgeAssetsCollection();
   const existing = await collection.findOne({ _id: rawNormalizedAsset.id });
+  const existingBySourcePath = !existing && options.source === 'obsidian_import' && rawNormalizedAsset.sourcePath
+    ? await collection.findOne({
+        sourcePath: rawNormalizedAsset.sourcePath,
+        serverStatus: { $ne: 'archived' },
+        serverDeletedAt: { $exists: false },
+      } as Filter<KnowledgeAssetDocument>)
+    : null;
+  if (existingBySourcePath) {
+    return { status: 'skipped', asset: existingBySourcePath };
+  }
   const asset = applyKnowledgeAccessPolicy(rawNormalizedAsset, {
     actor: options.actor,
     source: options.source,
@@ -554,7 +564,10 @@ async function upsertKnowledgeAsset(
     existing
     && existing.serverStatus !== 'archived'
     && !existing.serverDeletedAt
-    && isSameKnowledgeAssetContent(existing, asset)
+    && (
+      options.source === 'obsidian_import'
+      || isSameKnowledgeAssetContent(existing, asset)
+    )
   ) {
     return { status: 'skipped', asset: existing };
   }
