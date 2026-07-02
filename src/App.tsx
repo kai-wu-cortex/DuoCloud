@@ -20,7 +20,6 @@ import {
 
 // Shared data and types
 import { initialProducts, initialPracticeCards, initialKnowledgeAssets } from './data/mockData';
-import { obsidianKnowledgeAssets } from './data/obsidianKnowledgeAssets';
 import { KnowledgeAsset, PracticeCard } from './types';
 import {
   createPracticeCard,
@@ -50,10 +49,22 @@ const PracticeCloud = lazy(() => import('./components/PracticeCloud'));
 const DIFY_CHATBOT_TOKEN = 'Pqyg8S5HUiWNYD72';
 const DIFY_EMBED_SRC = 'https://udify.app/embed.min.js';
 
-const seededKnowledgeAssets = curateKnowledgeAssets([...obsidianKnowledgeAssets, ...initialKnowledgeAssets]);
+const lightweightKnowledgeAssets = curateKnowledgeAssets(initialKnowledgeAssets);
+let fullKnowledgeFallbackPromise: Promise<KnowledgeAsset[]> | null = null;
 
 function loadLocalKnowledgeFallback() {
-  return curateKnowledgeAssets(loadKnowledgeAssets(seededKnowledgeAssets));
+  return curateKnowledgeAssets(loadKnowledgeAssets(lightweightKnowledgeAssets));
+}
+
+async function loadFullLocalKnowledgeFallback() {
+  if (!fullKnowledgeFallbackPromise) {
+    fullKnowledgeFallbackPromise = import('./data/obsidianKnowledgeAssets').then(({ obsidianKnowledgeAssets }) => {
+      const seededKnowledgeAssets = curateKnowledgeAssets([...obsidianKnowledgeAssets, ...initialKnowledgeAssets]);
+      return curateKnowledgeAssets(loadKnowledgeAssets(seededKnowledgeAssets));
+    });
+  }
+
+  return fullKnowledgeFallbackPromise;
 }
 
 type DifyWindow = Window & {
@@ -66,6 +77,8 @@ type DifyWindow = Window & {
 };
 
 function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boolean }) {
+  const [isOpening, setIsOpening] = useState(false);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -77,21 +90,27 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
       userVariables: {},
     };
 
-    if (!document.getElementById('dify-chatbot-style-overrides')) {
-      const style = document.createElement('style');
+    let style = document.getElementById('dify-chatbot-style-overrides') as HTMLStyleElement | null;
+    if (!style) {
+      style = document.createElement('style');
       style.id = 'dify-chatbot-style-overrides';
-      style.textContent = `
-        #dify-chatbot-bubble-button {
-          background-color: #1C64F2 !important;
-          display: none !important;
-        }
-        #dify-chatbot-bubble-window {
-          width: 24rem !important;
-          height: 40rem !important;
-        }
-      `;
       document.head.appendChild(style);
     }
+    style.textContent = `
+      #dify-chatbot-bubble-button {
+        background-color: #1C64F2 !important;
+        width: 1px !important;
+        height: 1px !important;
+        min-width: 1px !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+        transform: scale(0.01) !important;
+      }
+      #dify-chatbot-bubble-window {
+        width: 24rem !important;
+        height: 40rem !important;
+      }
+    `;
 
     if (!document.getElementById(DIFY_CHATBOT_TOKEN)) {
       const script = document.createElement('script');
@@ -103,16 +122,27 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
   }, []);
 
   const openDifyChatbot = () => {
-    const bubbleButton = document.getElementById('dify-chatbot-bubble-button') as HTMLButtonElement | null;
-    if (bubbleButton) {
-      bubbleButton.click();
-      return;
-    }
+    let attempts = 0;
+    setIsOpening(true);
 
-    window.setTimeout(() => {
-      const delayedBubbleButton = document.getElementById('dify-chatbot-bubble-button') as HTMLButtonElement | null;
-      delayedBubbleButton?.click();
-    }, 600);
+    const clickWhenReady = () => {
+      const bubbleButton = document.getElementById('dify-chatbot-bubble-button') as HTMLElement | null;
+      if (bubbleButton) {
+        bubbleButton.click();
+        setIsOpening(false);
+        return;
+      }
+
+      attempts += 1;
+      if (attempts < 24) {
+        window.setTimeout(clickWhenReady, 250);
+        return;
+      }
+
+      setIsOpening(false);
+    };
+
+    clickWhenReady();
   };
 
   return (
@@ -129,7 +159,7 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
         <MessageCircle className="w-4 h-4" />
       </div>
       <div className={`min-w-0 text-left ${isSidebarCollapsed ? 'md:hidden' : 'block'}`}>
-        <p className="text-[11px] font-bold leading-tight">Dify AI 助手</p>
+        <p className="text-[11px] font-bold leading-tight">{isOpening ? '正在打开 Dify...' : 'Dify AI 助手'}</p>
         <p className="text-[10px] font-mono opacity-75 leading-tight">Knowledge Copilot</p>
       </div>
     </button>
@@ -180,7 +210,7 @@ export default function App() {
       }
 
       const currentAssets = knowledgeAssetsRef.current;
-      const fallbackAssets = currentAssets.length > 0 ? currentAssets : loadLocalKnowledgeFallback();
+      const fallbackAssets = currentAssets.length > 0 ? currentAssets : await loadFullLocalKnowledgeFallback();
       setKnowledgeAssets(currentAssets => (currentAssets.length > 0 ? currentAssets : fallbackAssets));
       if (currentAssets.length === 0) saveKnowledgeAssets(fallbackAssets);
       setKnowledgeCloudStatus('offline');
