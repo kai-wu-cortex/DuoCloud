@@ -11,6 +11,7 @@
     "lint": "tsc --noEmit",
     "create:knowledge-user": "tsx scripts/createKnowledgeUser.ts",
     "import:seed-knowledge": "tsx scripts/importSeedKnowledgeToMongo.ts",
+    "knowledge:agent": "tsx scripts/knowledgeCloudAgentCli.ts",
     "sync:obsidian-knowledge": "tsx scripts/syncObsidianKnowledge.ts",
     "migrate:obsidian-images": "tsx scripts/migrateObsidianImagesToBlob.ts",
     "test": "tsx --test src/**/*.test.ts"

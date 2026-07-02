@@ -135,6 +135,10 @@ function createAuthHeaders(user: SessionUser): Record<string, string> {
   return { cookie: `duocloud_session=${token}` };
 }
 
+function createAgentHeaders(token = 'agent-secret'): Record<string, string> {
+  return { authorization: `Bearer ${token}` };
+}
+
 function getSuccessData<T>(body: unknown): T {
   assert.ok(body && typeof body === 'object');
   assert.equal((body as { success?: unknown }).success, true);
@@ -543,4 +547,60 @@ test('bulk import logs import jobs, skips unchanged assets, and writes revisions
   assert.equal(importJobs.documents.length, 1);
   assert.equal(importJobs.documents[0].status, 'completed');
   assert.deepEqual(importJobs.documents[0].counts, data.counts);
+});
+
+test('agent bearer token can bulk upsert and export knowledge assets', async () => {
+  process.env.DUOCLOUD_AGENT_API_TOKEN = 'agent-secret';
+  const { revisions } = setupCollections();
+
+  const bulkReq = createRequest({
+    method: 'POST',
+    headers: createAgentHeaders(),
+    body: {
+      source: 'agent_cli',
+      input: 'hotfoil-skill-sync',
+      assets: [governanceAsset],
+    },
+  });
+  const bulkRes = createMockResponse();
+  await handleKnowledgeAssetBulkRequest(bulkReq, bulkRes.res);
+
+  assert.equal(bulkRes.state.statusCode, 200);
+  const bulkData = getSuccessData<{
+    counts: { created: number; updated: number; skipped: number; failed: number };
+  }>(bulkRes.state.body);
+  assert.deepEqual(bulkData.counts, { created: 1, updated: 0, skipped: 0, failed: 0 });
+  assert.equal((revisions.documents[0].actor as { username: string }).username, 'duocloud-agent-cli');
+
+  const exportReq = createRequest({
+    method: 'GET',
+    headers: createAgentHeaders(),
+  });
+  const exportRes = createMockResponse();
+  await handleKnowledgeAssetExportRequest(exportReq, exportRes.res);
+
+  assert.equal(exportRes.state.statusCode, 200);
+  const exported = getSuccessData<KnowledgeAssetDocument[]>(exportRes.state.body);
+  assert.equal(exported.length, 1);
+  assert.equal(exported[0].serverSource, 'agent_cli');
+});
+
+test('agent bearer token rejects invalid credentials', async () => {
+  process.env.DUOCLOUD_AGENT_API_TOKEN = 'agent-secret';
+  setupCollections();
+
+  const req = createRequest({
+    method: 'POST',
+    headers: createAgentHeaders('wrong-secret'),
+    body: {
+      source: 'agent_cli',
+      input: 'hotfoil-skill-sync',
+      assets: [governanceAsset],
+    },
+  });
+  const { res, state } = createMockResponse();
+  await invokeHandler(handleKnowledgeAssetBulkRequest, req, res);
+
+  assert.equal(state.statusCode, 401);
+  assert.equal(getErrorCode(state.body), 'UNAUTHORIZED');
 });

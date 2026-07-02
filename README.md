@@ -23,3 +23,82 @@ View your app in AI Studio: https://ai.studio/apps/bc2822f2-bcb2-4f71-91d3-96e82
    `npm run dev`
 
 Knowledge Cloud uses `MONGODB_URI`, optional `MONGODB_DIRECT_URI`, `KNOWLEDGE_DB_NAME`, and `SESSION_SECRET` from the environment. The login database collection is `system_users`.
+
+## Knowledge Cloud Agent API
+
+The Knowledge Cloud API supports both browser session auth and agent/CLI bearer-token auth. This lets the local `hotfoil-knowledge-ingestion` skill update the website knowledge cards after it updates Obsidian, MCP indexes, Cloudflare KV, and Feishu.
+
+Set these environment variables in local/Vercel environments:
+
+```bash
+DUOCLOUD_AGENT_API_TOKEN="long-random-token"
+DUOCLOUD_AGENT_API_ROLE="admin"
+```
+
+Agent requests use:
+
+```http
+Authorization: Bearer $DUOCLOUD_AGENT_API_TOKEN
+```
+
+Supported Knowledge Cloud endpoints:
+
+- `GET /api/knowledge-assets` - list active knowledge cards.
+- `GET /api/knowledge-assets/export` - export active knowledge cards.
+- `POST /api/knowledge-assets/bulk` - bulk upsert knowledge cards from Obsidian, an external update app, or an agent CLI.
+- `POST /api/knowledge-assets` - create one card.
+- `PUT /api/knowledge-assets/:id` - update one card with `serverVersion`.
+- `DELETE /api/knowledge-assets/:id` - archive one card with `serverVersion`.
+
+Bulk upsert payload:
+
+```json
+{
+  "source": "obsidian_import",
+  "input": "hotfoil-skill-sync-2026-07-02",
+  "assets": []
+}
+```
+
+`source` can be `obsidian_import`, `external_update_app`, `agent_cli`, or `duocloud`.
+
+## HotFoil Skill Website Sync
+
+After the `hotfoil-knowledge-ingestion` skill updates the Obsidian vault, run one of these commands to sync the website cards.
+
+Local Mongo-backed sync from the fixed HotFoil Obsidian vault:
+
+```bash
+npm run knowledge:agent -- obsidian \
+  --input "hotfoil-skill-sync-$(date +%F)"
+```
+
+Remote/Vercel HTTP sync:
+
+```bash
+npm run knowledge:agent -- obsidian \
+  --endpoint "https://your-duocloud-domain.vercel.app" \
+  --token "$DUOCLOUD_AGENT_API_TOKEN" \
+  --input "hotfoil-skill-sync-$(date +%F)"
+```
+
+Sync a prepared JSON file containing `KnowledgeAsset[]` or `{ "assets": [...] }`:
+
+```bash
+npm run knowledge:agent -- file \
+  --file ./outputs/knowledge_cloud_import_20260630/knowledge_cloud_import_data.json \
+  --source external_update_app \
+  --input "field-template-import"
+```
+
+Preview without writing:
+
+```bash
+npm run knowledge:agent -- obsidian --dry-run
+```
+
+Export for audit:
+
+```bash
+npm run knowledge:agent -- export
+```

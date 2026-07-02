@@ -27,7 +27,7 @@ const KNOWLEDGE_CATEGORIES: readonly KnowledgeTableType[] = [
   'knowledge_governance',
 ];
 
-type KnowledgeAssetSource = 'duocloud' | 'obsidian_import' | 'external_update_app';
+type KnowledgeAssetSource = 'duocloud' | 'obsidian_import' | 'external_update_app' | 'agent_cli';
 type KnowledgeAssetStatus = 'active' | 'archived' | 'draft';
 type KnowledgeAssetOperation = 'create' | 'update' | 'delete' | 'bulk-import';
 
@@ -156,6 +156,73 @@ function parseBody(body: unknown): unknown {
 
 function toActor(user: SessionUser): KnowledgeAssetActor {
   return { uid: user.uid, username: user.username };
+}
+
+function getHeaderValue(
+  headers: Pick<Request, 'headers'>['headers'],
+  name: string,
+): string | undefined {
+  const direct = headers[name] ?? headers[name.toLowerCase()];
+  if (Array.isArray(direct)) return direct[0];
+  return typeof direct === 'string' ? direct : undefined;
+}
+
+function getConfiguredAgentApiToken(): string | undefined {
+  const token = process.env.DUOCLOUD_AGENT_API_TOKEN || process.env.KNOWLEDGE_AGENT_API_TOKEN;
+  return token && token.trim() ? token.trim() : undefined;
+}
+
+function getAgentRole(): SessionUser['role'] {
+  const role = process.env.DUOCLOUD_AGENT_API_ROLE || process.env.KNOWLEDGE_AGENT_API_ROLE;
+  return role === 'viewer' || role === 'editor' || role === 'admin' ? role : 'admin';
+}
+
+function getAgentSessionFromRequest(req: Pick<Request, 'headers'>): SessionUser | null {
+  const authorization = getHeaderValue(req.headers, 'authorization');
+  if (!authorization) return null;
+
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  if (!match) {
+    throw new KnowledgeAssetApiError(401, 'UNAUTHORIZED', 'UNAUTHORIZED: agent authorization header is invalid.');
+  }
+
+  const configuredToken = getConfiguredAgentApiToken();
+  if (!configuredToken || match[1].trim() !== configuredToken) {
+    throw new KnowledgeAssetApiError(401, 'UNAUTHORIZED', 'UNAUTHORIZED: agent API token is invalid.');
+  }
+
+  return {
+    uid: 'duocloud-agent-cli',
+    username: 'duocloud-agent-cli',
+    role: getAgentRole(),
+  };
+}
+
+function roleSatisfies(role: SessionUser['role'], allowedRoles: SessionUser['role'][]): boolean {
+  if (allowedRoles.includes(role)) return true;
+  if (role === 'admin') return allowedRoles.some(allowed => allowed === 'editor' || allowed === 'viewer');
+  if (role === 'editor') return allowedRoles.includes('viewer');
+  return false;
+}
+
+function requireKnowledgeSession(req: Pick<Request, 'headers'>): SessionUser {
+  const agent = getAgentSessionFromRequest(req);
+  if (agent) return agent;
+  return requireSession(req, getSessionSecret());
+}
+
+function requireKnowledgeRole(
+  req: Pick<Request, 'headers'>,
+  allowedRoles: SessionUser['role'][],
+): SessionUser {
+  const agent = getAgentSessionFromRequest(req);
+  if (agent) {
+    if (!roleSatisfies(agent.role, allowedRoles)) {
+      throw new KnowledgeAssetApiError(403, 'FORBIDDEN', 'FORBIDDEN: agent role is insufficient.');
+    }
+    return agent;
+  }
+  return requireRole(req, getSessionSecret(), allowedRoles);
 }
 
 function formatDateOnly(now: Date): string {
@@ -402,10 +469,8 @@ export async function handleKnowledgeAssetsRequest(
   req: Pick<Request, 'method' | 'headers' | 'body' | 'query'>,
   res: Pick<Response, 'status' | 'json'>,
 ): Promise<void> {
-  const secret = getSessionSecret();
-
   if (req.method === 'GET') {
-    requireSession(req, secret);
+    requireKnowledgeSession(req);
     const collection = await getKnowledgeAssetsCollection();
     const filter = buildActiveFilter();
     const category = getQueryString(req.query.category);
@@ -430,7 +495,7 @@ export async function handleKnowledgeAssetsRequest(
   }
 
   if (req.method === 'POST') {
-    const actor = requireRole(req, secret, ['editor', 'admin']);
+    const actor = requireKnowledgeRole(req, ['editor', 'admin']);
     const incomingAsset = ensureNormalizedKnowledgeAsset(parseBody(req.body));
     const collection = await getKnowledgeAssetsCollection();
     const existing = await collection.findOne({ _id: incomingAsset.id });
@@ -461,11 +526,10 @@ export async function handleKnowledgeAssetDocumentRequest(
   req: Pick<Request, 'method' | 'headers' | 'body' | 'query'>,
   res: Pick<Response, 'status' | 'json'>,
 ): Promise<void> {
-  const secret = getSessionSecret();
   const id = getKnowledgeAssetIdFromRequest(req);
 
   if (req.method === 'GET') {
-    requireSession(req, secret);
+    requireKnowledgeSession(req);
     const asset = await findActiveAssetById(id);
     if (!asset) {
       throw new KnowledgeAssetApiError(404, 'NOT_FOUND', 'NOT_FOUND: 未找到知识卡片。');
@@ -475,7 +539,7 @@ export async function handleKnowledgeAssetDocumentRequest(
   }
 
   if (req.method === 'PUT') {
-    const actor = requireRole(req, secret, ['editor', 'admin']);
+    const actor = requireKnowledgeRole(req, ['editor', 'admin']);
     const rawBody = asRecord(parseBody(req.body)) ?? {};
     const expectedServerVersion = getRequestServerVersion(rawBody);
     if (expectedServerVersion === null) {
@@ -518,7 +582,7 @@ export async function handleKnowledgeAssetDocumentRequest(
   }
 
   if (req.method === 'DELETE') {
-    const actor = requireRole(req, secret, ['admin']);
+    const actor = requireKnowledgeRole(req, ['admin']);
     const rawBody = asRecord(parseBody(req.body)) ?? {};
     const expectedServerVersion = getRequestServerVersion(rawBody);
     if (expectedServerVersion === null) {
@@ -570,10 +634,10 @@ export async function handleKnowledgeAssetBulkRequest(
     throw new KnowledgeAssetApiError(405, 'METHOD_NOT_ALLOWED', 'METHOD_NOT_ALLOWED: 仅支持 POST。');
   }
 
-  const actor = requireRole(req, getSessionSecret(), ['admin']);
+  const actor = requireKnowledgeRole(req, ['admin']);
   const payload = (asRecord(parseBody(req.body)) ?? {}) as BulkRequestBody & Record<string, unknown>;
   const source: KnowledgeAssetSource =
-    payload.source === 'obsidian_import' || payload.source === 'external_update_app'
+    payload.source === 'obsidian_import' || payload.source === 'external_update_app' || payload.source === 'agent_cli'
       ? payload.source
       : 'duocloud';
   const input = typeof payload.input === 'string' && payload.input.trim() ? payload.input.trim() : 'bulk-request';
@@ -662,7 +726,7 @@ export async function handleKnowledgeAssetExportRequest(
     throw new KnowledgeAssetApiError(405, 'METHOD_NOT_ALLOWED', 'METHOD_NOT_ALLOWED: 仅支持 GET。');
   }
 
-  requireSession(req, getSessionSecret());
+  requireKnowledgeSession(req);
   const collection = await getKnowledgeAssetsCollection();
   const items = await collection.find(buildActiveFilter()).sort({ serverUpdatedAt: -1, _id: 1 }).toArray();
 
