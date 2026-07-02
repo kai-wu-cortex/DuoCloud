@@ -827,6 +827,8 @@ export default function KnowledgeCloud({
       return;
     }
     resetKnowledgeForm();
+    setKnowledgeScope('private');
+    setIsPrivateCategoryOpen(true);
     setIsModalOpen(true);
   };
 
@@ -891,9 +893,9 @@ export default function KnowledgeCloud({
     });
     const scopedDraft = {
       ...draft,
-      access: editingAsset?.access ?? (knowledgeScope === 'private' ? 'private' : 'public'),
-      ownerUid: editingAsset?.ownerUid ?? (knowledgeScope === 'private' ? currentUser.uid : undefined),
-      ownerUsername: editingAsset?.ownerUsername ?? (knowledgeScope === 'private' ? currentUser.username : undefined),
+      access: editingAsset?.access ?? 'private',
+      ownerUid: editingAsset?.ownerUid ?? currentUser.uid,
+      ownerUsername: editingAsset?.ownerUsername ?? currentUser.username,
     } as Omit<KnowledgeAsset, 'id' | 'lastUpdated'>;
 
     if (editingAsset) {
@@ -915,6 +917,8 @@ export default function KnowledgeCloud({
     } else {
       try {
         await onAddAsset(scopedDraft);
+        setKnowledgeScope('private');
+        setIsPrivateCategoryOpen(true);
         showToast('知识卡片已同步创建');
       } catch (error) {
         console.error('Failed to create knowledge asset', error);
@@ -1947,7 +1951,7 @@ export default function KnowledgeCloud({
                     title={canEdit ? '创建知识卡片' : '当前不可创建知识卡片'}
                   >
                     <Plus className="w-4 h-4" />
-                    <span>Create</span>
+                    <span>创建</span>
                   </button>
 
                   <button
@@ -2355,7 +2359,7 @@ export default function KnowledgeCloud({
                 <Search className="w-12 h-12 text-slate-300 mb-2" />
                 <p className="text-sm font-bold text-primary">暂无匹配的知识资产</p>
                 <p className="text-xs text-slate-400 mt-1 max-w-sm">
-                  尝试调整搜索词或分类，或者点击“Create Library”录入数据。
+                  尝试调整搜索词或分类，或者点击“创建”录入私人知识云数据。
                 </p>
               </div>
             )}
