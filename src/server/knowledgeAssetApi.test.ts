@@ -396,6 +396,9 @@ test('CRUD handlers preserve domain fields, enforce serverVersion, and write rev
   const created = getSuccessData<KnowledgeAssetDocument>(createRes.state.body);
   assert.equal(created.source, 'ERP同步');
   assert.equal(created.version, 'V1.0');
+  assert.equal(created.access, 'private');
+  assert.equal(created.ownerUid, editorUser.uid);
+  assert.equal(created.ownerUsername, editorUser.username);
   assert.equal(created.serverSource, 'duocloud');
   assert.equal(created.serverVersion, 1);
 
@@ -521,7 +524,7 @@ test('bulk import logs import jobs, skips unchanged assets, and writes revisions
     title: '治理规则-更新',
     version: 'V2.0',
   };
-  const { revisions, importJobs } = setupCollections({ assets: [existing] });
+  const { assets, revisions, importJobs } = setupCollections({ assets: [existing] });
 
   const req = createRequest({
     method: 'POST',
@@ -545,6 +548,8 @@ test('bulk import logs import jobs, skips unchanged assets, and writes revisions
   assert.equal(data.errors.length, 0);
   assert.equal(revisions.documents.length, 3);
   assert.deepEqual(revisions.documents.map(entry => entry.operation), ['bulk-import', 'bulk-import', 'bulk-import']);
+  assert.equal(assets.documents.find(asset => asset._id === 'KA-001')?.access, 'public');
+  assert.equal(assets.documents.find(asset => asset._id === 'PM-001')?.access, 'public');
   assert.equal(importJobs.documents.length, 1);
   assert.equal(importJobs.documents[0].status, 'completed');
   assert.deepEqual(importJobs.documents[0].counts, data.counts);
@@ -572,6 +577,9 @@ test('agent bearer token can bulk upsert and export knowledge assets', async () 
   }>(bulkRes.state.body);
   assert.deepEqual(bulkData.counts, { created: 1, updated: 0, skipped: 0, failed: 0 });
   assert.equal((revisions.documents[0].actor as { username: string }).username, 'duocloud-agent-cli');
+  const revisionNext = revisions.documents[0].next as KnowledgeAssetDocument | null;
+  assert.equal(revisionNext?.access, 'public');
+  assert.equal(revisionNext?.ownerUid, undefined);
 
   const exportReq = createRequest({
     method: 'GET',
@@ -634,6 +642,8 @@ test('agent endpoint supports health, upsert, patch, and delete without browser 
   const upserted = getSuccessData<{ status: string; asset: KnowledgeAssetDocument }>(upsertRes.state.body);
   assert.equal(upserted.status, 'created');
   assert.equal(upserted.asset.serverSource, 'agent_cli');
+  assert.equal(upserted.asset.access, 'public');
+  assert.equal(upserted.asset.ownerUid, undefined);
 
   const patchReq = createRequest({
     method: 'POST',

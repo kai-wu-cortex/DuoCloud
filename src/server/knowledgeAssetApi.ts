@@ -424,6 +424,40 @@ export function normalizeKnowledgeAssetId(id: string): string {
   return id.trim().replace(/[^A-Za-z0-9_-]/g, '_');
 }
 
+function applyKnowledgeAccessPolicy(
+  asset: KnowledgeAsset,
+  options: {
+    actor: SessionUser;
+    source: KnowledgeAssetSource;
+    existing?: KnowledgeAssetDocument | null;
+  },
+): KnowledgeAsset {
+  if (options.existing && options.existing.serverStatus !== 'archived' && !options.existing.serverDeletedAt) {
+    return {
+      ...asset,
+      access: options.existing.access,
+      ownerUid: options.existing.ownerUid,
+      ownerUsername: options.existing.ownerUsername,
+    };
+  }
+
+  if (options.source === 'duocloud') {
+    return {
+      ...asset,
+      access: 'private',
+      ownerUid: options.actor.uid,
+      ownerUsername: options.actor.username,
+    };
+  }
+
+  return {
+    ...asset,
+    access: 'public',
+    ownerUid: undefined,
+    ownerUsername: undefined,
+  };
+}
+
 export function validateKnowledgeAssetPayload(
   value: unknown,
 ): { valid: true } | { valid: false; message: string } {
@@ -507,9 +541,14 @@ async function upsertKnowledgeAsset(
   status: 'created' | 'updated' | 'skipped';
   asset: KnowledgeAssetDocument;
 }> {
-  const asset = ensureNormalizedKnowledgeAsset(rawAsset);
+  const rawNormalizedAsset = ensureNormalizedKnowledgeAsset(rawAsset);
   const collection = await getKnowledgeAssetsCollection();
-  const existing = await collection.findOne({ _id: asset.id });
+  const existing = await collection.findOne({ _id: rawNormalizedAsset.id });
+  const asset = applyKnowledgeAccessPolicy(rawNormalizedAsset, {
+    actor: options.actor,
+    source: options.source,
+    existing,
+  });
 
   if (
     existing
@@ -570,12 +609,17 @@ export async function handleKnowledgeAssetsRequest(
 
   if (req.method === 'POST') {
     const actor = requireKnowledgeRole(req, ['editor', 'admin']);
-    const incomingAsset = ensureNormalizedKnowledgeAsset(parseBody(req.body));
+    const rawIncomingAsset = ensureNormalizedKnowledgeAsset(parseBody(req.body));
     const collection = await getKnowledgeAssetsCollection();
-    const existing = await collection.findOne({ _id: incomingAsset.id });
+    const existing = await collection.findOne({ _id: rawIncomingAsset.id });
     if (existing && existing.serverStatus !== 'archived' && !existing.serverDeletedAt) {
       throw new KnowledgeAssetApiError(409, 'CONFLICT', 'CONFLICT: 知识卡片已存在。');
     }
+    const incomingAsset = applyKnowledgeAccessPolicy(rawIncomingAsset, {
+      actor,
+      source: 'duocloud',
+      existing,
+    });
 
     const now = new Date();
     const next = applyKnowledgeAssetUpdate(incomingAsset, {
@@ -629,7 +673,12 @@ export async function handleKnowledgeAssetDocumentRequest(
       throw new KnowledgeAssetApiError(404, 'NOT_FOUND', 'NOT_FOUND: 未找到知识卡片。');
     }
 
-    const incomingAsset = ensureNormalizedKnowledgeAsset({ ...rawBody, id });
+    const rawIncomingAsset = ensureNormalizedKnowledgeAsset({ ...rawBody, id });
+    const incomingAsset = applyKnowledgeAccessPolicy(rawIncomingAsset, {
+      actor,
+      source: existing.serverSource,
+      existing,
+    });
     const now = new Date();
     const next = applyKnowledgeAssetUpdate(incomingAsset, {
       actor,
