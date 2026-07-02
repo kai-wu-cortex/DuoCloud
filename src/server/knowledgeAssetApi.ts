@@ -212,11 +212,17 @@ function stripKnowledgeAssetMetadata(document: KnowledgeAssetDocument): Knowledg
   return asset as KnowledgeAsset;
 }
 
+function stripServerManagedKnowledgeAssetFields(asset: KnowledgeAsset): Omit<KnowledgeAsset, 'lastUpdated'> {
+  const { lastUpdated: _ignoredLastUpdated, ...content } = asset;
+  return content;
+}
+
 function isSameKnowledgeAssetContent(
   existing: KnowledgeAssetDocument,
   incoming: KnowledgeAsset,
 ): boolean {
-  return JSON.stringify(stripKnowledgeAssetMetadata(existing)) === JSON.stringify(incoming);
+  return JSON.stringify(stripServerManagedKnowledgeAssetFields(stripKnowledgeAssetMetadata(existing)))
+    === JSON.stringify(stripServerManagedKnowledgeAssetFields(incoming));
 }
 
 async function getKnowledgeAssetsCollection(): Promise<KnowledgeAssetCollectionLike<KnowledgeAssetDocument>> {

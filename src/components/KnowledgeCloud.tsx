@@ -1971,6 +1971,7 @@ export default function KnowledgeCloud({
                 const primaryTag = asset.tags[0] || '未标记';
                 const tagSuffix = asset.tags.length > 1 ? ` +${asset.tags.length - 1}` : '';
                 const previewText = getKnowledgePreviewText(asset.content);
+                const cardImage = collectKnowledgeAttachments(asset).find(item => item.type === 'image' && item.previewSrc);
                 return (
                   <div
                     key={asset.id}
@@ -2044,18 +2045,45 @@ export default function KnowledgeCloud({
                     </div>
 
                     {/* Content Section */}
-                    <div className="mt-2.5 flex-1 min-h-0">
-                      <h3 className={`font-black tracking-tight text-[13px] leading-snug line-clamp-2 ${
-                        isActive && !isEditMode ? 'text-white' : 'text-[#0D0B3D]'
-                      }`}>
-                        {asset.title}
-                      </h3>
-                      <p className={`text-[11px] mt-1.5 leading-snug line-clamp-2 font-semibold ${
-                        isActive && !isEditMode ? 'text-white/80' : 'text-slate-400'
-                      }`}>
-                        {previewText || '暂无详细描述'}
-                      </p>
-                    </div>
+                    {cardImage?.previewSrc ? (
+                      <div className="mt-2.5 flex-1 min-h-0 grid grid-cols-[minmax(0,1fr)_5.8rem] gap-3 items-stretch">
+                        <div className="min-w-0 flex flex-col justify-center">
+                          <h3 className={`font-black tracking-tight text-[13px] leading-snug line-clamp-2 ${
+                            isActive && !isEditMode ? 'text-white' : 'text-[#0D0B3D]'
+                          }`}>
+                            {asset.title}
+                          </h3>
+                          <p className={`text-[11px] mt-1.5 leading-snug line-clamp-3 font-semibold ${
+                            isActive && !isEditMode ? 'text-white/80' : 'text-slate-400'
+                          }`}>
+                            {previewText || '暂无详细描述'}
+                          </p>
+                        </div>
+                        <div className={`relative overflow-hidden rounded-xl border shrink-0 ${
+                          isActive && !isEditMode ? 'border-white/15 bg-white/10' : 'border-[#E2E4E9] bg-slate-50'
+                        }`}>
+                          <img
+                            src={cardImage.previewSrc}
+                            alt={cardImage.label}
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2.5 flex-1 min-h-0">
+                        <h3 className={`font-black tracking-tight text-[13px] leading-snug line-clamp-2 ${
+                          isActive && !isEditMode ? 'text-white' : 'text-[#0D0B3D]'
+                        }`}>
+                          {asset.title}
+                        </h3>
+                        <p className={`text-[11px] mt-1.5 leading-snug line-clamp-2 font-semibold ${
+                          isActive && !isEditMode ? 'text-white/80' : 'text-slate-400'
+                        }`}>
+                          {previewText || '暂无详细描述'}
+                        </p>
+                      </div>
+                    )}
 
                     {/* Bottom Metadata row */}
                     <div className={`flex items-center justify-between gap-3 text-[10px] font-extrabold pt-2.5 border-t font-mono tracking-wider uppercase ${
