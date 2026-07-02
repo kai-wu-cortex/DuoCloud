@@ -989,6 +989,8 @@ export default function KnowledgeCloud({
 
   const visibleAssets = useMemo(() => filteredAssets.slice(0, renderLimit), [filteredAssets, renderLimit]);
   const hasMoreFilteredAssets = visibleAssets.length < filteredAssets.length;
+  const showSyncSkeleton = isSyncing && assets.length <= 10;
+  const skeletonItems = useMemo(() => Array.from({ length: 10 }, (_, index) => index), []);
 
   const selectedAssets = useMemo(
     () => assets.filter(asset => selectedAssetIdSet.has(asset.id)),
@@ -1483,6 +1485,74 @@ export default function KnowledgeCloud({
     </div>
   );
 
+  const renderCountBadge = (count: number, isSelected: boolean) => (
+    showSyncSkeleton ? (
+      <span className={`skeleton-shimmer h-5 w-9 rounded-xl shrink-0 ${isSelected ? 'bg-white/25' : ''}`} />
+    ) : (
+      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-xl font-mono shrink-0 ${isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}`}>
+        {count}
+      </span>
+    )
+  );
+
+  const SkeletonLine: React.FC<{ className?: string; style?: React.CSSProperties }> = ({ className = '', style }) => (
+    <div className={`skeleton-shimmer rounded-full ${className}`} style={style} />
+  );
+
+  const KnowledgeCardSkeleton: React.FC<{ index: number }> = ({ index }) => (
+    <div
+      className="knowledge-grid-card rounded-[20px] px-4 py-3.5 h-[168px] bg-white border border-[#E2E4E9] shadow-sm flex flex-col justify-between"
+      aria-hidden="true"
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <SkeletonLine className="w-6 h-6" />
+          <SkeletonLine className="w-28 h-6" />
+        </div>
+        {index % 3 === 0 && <SkeletonLine className="w-14 h-6" />}
+      </div>
+      <div className="space-y-2.5">
+        <SkeletonLine className="w-4/5 h-4" />
+        <SkeletonLine className="w-full h-3" />
+        <SkeletonLine className="w-2/3 h-3" />
+      </div>
+      <div className="flex items-center justify-between gap-4 border-t border-[#F1F3F7] pt-2.5">
+        <SkeletonLine className="w-24 h-4" />
+        <SkeletonLine className="w-20 h-4" />
+      </div>
+    </div>
+  );
+
+  const KnowledgeListSkeleton = () => (
+    <div className="bg-white border border-[#E2E4E9] rounded-2xl overflow-hidden shadow-sm" aria-hidden="true">
+      <div className="overflow-x-auto custom-scrollbar">
+        <table className="min-w-[1160px] w-full text-left border-collapse">
+          <thead>
+            <tr className="bg-slate-50 border-b border-[#E2E4E9]">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <th key={index} className="py-3 px-5">
+                  <SkeletonLine className="h-3 w-24" />
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#F1F3F7]">
+            {skeletonItems.map(index => (
+              <tr key={index}>
+                <td className="py-4 px-5"><SkeletonLine className="h-4 w-56" /></td>
+                <td className="py-4 px-5"><SkeletonLine className="h-6 w-28" /></td>
+                <td className="py-4 px-5"><SkeletonLine className="h-4 w-24" /></td>
+                <td className="py-4 px-5"><SkeletonLine className="h-4 w-20" /></td>
+                <td className="py-4 px-5"><SkeletonLine className="h-5 w-16" /></td>
+                <td className="py-4 px-5"><SkeletonLine className="h-8 w-20 ml-auto" /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex flex-col lg:flex-row gap-6 h-full bg-[#F4F5FA] relative min-h-[calc(100vh-140px)]" id="knowledge-cloud">
       {/* Toast Notification */}
@@ -1524,9 +1594,7 @@ export default function KnowledgeCloud({
               <BookOpen className="w-4 h-4 shrink-0" />
               全部数据 (All)
             </span>
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-xl font-mono ${activeCategory === 'all' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}`}>
-              {assets.length}
-            </span>
+            {renderCountBadge(assets.length, activeCategory === 'all')}
           </button>
 
           {(Object.keys(CATEGORY_MAP) as KnowledgeTableType[]).map((cat) => {
@@ -1550,9 +1618,7 @@ export default function KnowledgeCloud({
                   <span className={`${isSelected ? 'text-white' : 'text-[#5F52EE]'}`}>{item.icon}</span>
                   <span className="truncate text-left">{item.label}</span>
                 </span>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-xl font-mono shrink-0 ${isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}`}>
-                  {count}
-                </span>
+                {renderCountBadge(count, isSelected)}
               </button>
             );
           })}
@@ -1574,7 +1640,13 @@ export default function KnowledgeCloud({
               </button>
             )}
           </div>
-          {directoryTree.length > 0 ? (
+          {showSyncSkeleton ? (
+            <div className="space-y-2 px-2 py-3" aria-hidden="true">
+              <SkeletonLine className="h-4 w-32" />
+              <SkeletonLine className="h-4 w-44 ml-4" />
+              <SkeletonLine className="h-4 w-36 ml-8" />
+            </div>
+          ) : directoryTree.length > 0 ? (
             renderDirectoryNodes(directoryTree)
           ) : (
             <div className="px-2 py-3 text-[11px] font-bold text-slate-400">
@@ -1591,7 +1663,12 @@ export default function KnowledgeCloud({
             <h1 className="text-xl md:text-2xl font-black text-[#0D0B3D] tracking-tight flex flex-wrap items-baseline gap-x-2 gap-y-1 min-w-0">
               <span>{categoryTitle}</span>
               {activeDirectoryLabel && <span className="text-[#5F52EE] text-sm font-black">/ {activeDirectoryLabel}</span>}
-              <span className="text-slate-400 font-semibold text-xs md:text-sm">({filteredAssets.length})</span>
+              <span className="text-slate-400 font-semibold text-xs md:text-sm">({showSyncSkeleton ? 0 : filteredAssets.length})</span>
+              {showSyncSkeleton && (
+                <span className="text-[#5F52EE] text-[11px] font-black bg-[#5F52EE]/10 px-2 py-0.5 rounded-lg">
+                  正在同步
+                </span>
+              )}
               {deferredSearchQuery !== searchQuery && (
                 <span className="text-[#5F52EE] text-[11px] font-black bg-[#5F52EE]/10 px-2 py-0.5 rounded-lg">
                   搜索中
@@ -1798,36 +1875,46 @@ export default function KnowledgeCloud({
               <Tag className="w-3.5 h-3.5 text-[#5F52EE]" />
               标签分组
             </span>
-            <button
-              type="button"
-              onClick={() => setActiveTagFilter('all')}
-              className={`h-7 px-2.5 rounded-lg text-[11px] font-black transition cursor-pointer ${
-                activeTagFilter === 'all'
-                  ? 'bg-[#0D0B3D] text-white shadow-sm'
-                  : 'bg-white text-slate-500 hover:text-[#5F52EE] hover:bg-slate-50 border border-[#E2E4E9]'
-              }`}
-            >
-              全部标签
-            </button>
-            {tagFilterOptions.map(option => (
-              <button
-                key={option.tag}
-                type="button"
-                onClick={() => setActiveTagFilter(option.tag)}
-                className={`h-7 max-w-[11rem] inline-flex items-center gap-1.5 px-2.5 rounded-lg text-[11px] font-black transition cursor-pointer ${
-                  activeTagFilter === option.tag
-                    ? 'bg-[#5F52EE] text-white shadow-sm'
-                    : 'bg-white text-[#0D0B3D] hover:text-[#5F52EE] hover:bg-slate-50 border border-[#E2E4E9]'
-                }`}
-                title={option.tag}
-              >
-                <span className="truncate">{option.tag}</span>
-                <span className={`font-mono rounded-md px-1.5 py-0.5 ${activeTagFilter === option.tag ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}`}>
-                  {option.count}
-                </span>
-              </button>
-            ))}
-            {activeTagFilter !== 'all' && (
+            {showSyncSkeleton ? (
+              <div className="flex flex-wrap items-center gap-2" aria-hidden="true">
+                {[6.5, 5.25, 7.5, 4.75, 6, 5.5].map((width, index) => (
+                  <SkeletonLine key={index} className="h-7" style={{ width: `${width}rem` } as React.CSSProperties} />
+                ))}
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setActiveTagFilter('all')}
+                  className={`h-7 px-2.5 rounded-lg text-[11px] font-black transition cursor-pointer ${
+                    activeTagFilter === 'all'
+                      ? 'bg-[#0D0B3D] text-white shadow-sm'
+                      : 'bg-white text-slate-500 hover:text-[#5F52EE] hover:bg-slate-50 border border-[#E2E4E9]'
+                  }`}
+                >
+                  全部标签
+                </button>
+                {tagFilterOptions.map(option => (
+                  <button
+                    key={option.tag}
+                    type="button"
+                    onClick={() => setActiveTagFilter(option.tag)}
+                    className={`h-7 max-w-[11rem] inline-flex items-center gap-1.5 px-2.5 rounded-lg text-[11px] font-black transition cursor-pointer ${
+                      activeTagFilter === option.tag
+                        ? 'bg-[#5F52EE] text-white shadow-sm'
+                        : 'bg-white text-[#0D0B3D] hover:text-[#5F52EE] hover:bg-slate-50 border border-[#E2E4E9]'
+                    }`}
+                    title={option.tag}
+                  >
+                    <span className="truncate">{option.tag}</span>
+                    <span className={`font-mono rounded-md px-1.5 py-0.5 ${activeTagFilter === option.tag ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                      {option.count}
+                    </span>
+                  </button>
+                ))}
+              </>
+            )}
+            {!showSyncSkeleton && activeTagFilter !== 'all' && (
               <button
                 type="button"
                 onClick={() => setActiveTagFilter('all')}
@@ -1928,30 +2015,30 @@ export default function KnowledgeCloud({
           </div>
         </div>
 
-      {/* Main Content Pane */}
-      <div className="flex-1 flex flex-col gap-4 overflow-hidden">
-        {/* Section Heading like "Recently Created" */}
-        <div className="flex items-center justify-between font-medium shrink-0">
-          <span className="text-xs font-extrabold text-slate-400 tracking-wider uppercase">
-            Recently Created ({filteredAssets.length})
-          </span>
-          {isEditMode && (
-            <span className="text-[11px] font-black text-[#5F52EE] bg-[#5F52EE]/10 border border-[#5F52EE]/15 px-2.5 py-1 rounded-lg">
-              已选择 {selectedAssetIds.length} 张
+        {/* Main Content Pane */}
+        <div className="flex-1 flex flex-col gap-4 overflow-hidden">
+          {/* Section Heading like "Recently Created" */}
+          <div className="flex items-center justify-between font-medium shrink-0">
+            <span className="text-xs font-extrabold text-slate-400 tracking-wider uppercase">
+              Recently Created ({showSyncSkeleton ? 0 : filteredAssets.length})
             </span>
-          )}
-          {activeCategory !== 'all' && (
-            <button 
-              onClick={() => {
-                setActiveCategory('all');
-                setActiveDirectoryPath('');
-              }} 
-              className="text-xs text-[#5F52EE] font-bold hover:underline cursor-pointer"
-            >
-              Clear Category Filter
-            </button>
-          )}
-        </div>
+            {isEditMode && (
+              <span className="text-[11px] font-black text-[#5F52EE] bg-[#5F52EE]/10 border border-[#5F52EE]/15 px-2.5 py-1 rounded-lg">
+                已选择 {selectedAssetIds.length} 张
+              </span>
+            )}
+            {activeCategory !== 'all' && (
+              <button
+                onClick={() => {
+                  setActiveCategory('all');
+                  setActiveDirectoryPath('');
+                }}
+                className="text-xs text-[#5F52EE] font-bold hover:underline cursor-pointer"
+              >
+                Clear Category Filter
+              </button>
+            )}
+          </div>
 
         {/* Grid and Card Renderers */}
         {viewMode === 'grid' ? (
@@ -1962,7 +2049,13 @@ export default function KnowledgeCloud({
               cardsPerRow === 3 ? 'lg:grid-cols-3' : cardsPerRow === 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-5'
             }`}
           >
-            {filteredAssets.length > 0 ? (
+            {showSyncSkeleton ? (
+              <>
+                {skeletonItems.map(index => (
+                  <KnowledgeCardSkeleton key={index} index={index} />
+                ))}
+              </>
+            ) : filteredAssets.length > 0 ? (
               <>
               {visibleAssets.map((asset) => {
                 const catItem = CATEGORY_MAP[asset.category] || { label: asset.category, enLabel: 'Asset', icon: <Box className="w-4 h-4" /> };
@@ -2133,7 +2226,9 @@ export default function KnowledgeCloud({
         ) : (
           /* List View */
           <div className="flex-1 overflow-y-auto pb-12 pr-2 custom-scrollbar">
-            {filteredAssets.length > 0 ? (
+            {showSyncSkeleton ? (
+              <KnowledgeListSkeleton />
+            ) : filteredAssets.length > 0 ? (
               <div className="bg-white border border-[#E2E4E9] rounded-2xl overflow-hidden shadow-sm">
                 <div className="overflow-x-auto custom-scrollbar">
                 <table className="min-w-[1160px] w-full text-left border-collapse">

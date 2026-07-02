@@ -59,6 +59,27 @@
     transform-style: preserve-3d;
   }
 
+  .skeleton-shimmer {
+    position: relative;
+    overflow: hidden;
+    background: #EEF1F6;
+  }
+
+  .skeleton-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent);
+    animation: skeleton-shimmer 1.35s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-shimmer {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
   .knowledge-rich-editor a,
   .knowledge-rich-output a {
     color: #5F52EE;
