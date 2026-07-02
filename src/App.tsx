@@ -338,7 +338,7 @@ function DifyChatbotLauncher({ isSidebarCollapsed }: { isSidebarCollapsed: boole
         <button
           type="button"
           onClick={() => setIsDifyFullscreen(value => !value)}
-          className="fixed z-[2147483001] w-8 h-8 rounded-lg bg-transparent border-0 text-[#1C64F2] shadow-none flex items-center justify-center hover:text-[#1557D6] transition"
+          className="fixed z-[2147483001] w-8 h-8 rounded-lg bg-white/75 border border-white/70 text-[#1C64F2] shadow-lg shadow-slate-900/10 backdrop-blur-md flex items-center justify-center hover:bg-white/90 hover:text-[#1557D6] transition"
           style={{
             top: `${difyControlPosition.top}px`,
             right: `${difyControlPosition.right}px`,
