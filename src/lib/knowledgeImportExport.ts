@@ -57,7 +57,7 @@ export const KNOWLEDGE_IMPORT_TEMPLATES: TableTemplateConfig[] = [
     businessName: '产品 × 底材适配规则表',
     aliases: {
       productNo: ['产品型号', '产品型号 / 系列', '产品型号/系列'],
-      relatedPracticeCases: ['关联实践云案例', '关联实践案例'],
+      relatedPracticeCases: ['关联交付可信案例', '关联实践云案例', '关联实践案例'],
     },
   },
   {
@@ -107,7 +107,7 @@ export const KNOWLEDGE_IMPORT_TEMPLATES: TableTemplateConfig[] = [
     aliases: {
       faqNo: ['问题编号', 'FAQ编号'],
       questionCategory: ['问题分类', '问题类型'],
-      relatedPracticeCases: ['关联实践云案例', '关联实践案例'],
+      relatedPracticeCases: ['关联交付可信案例', '关联实践云案例', '关联实践案例'],
     },
   },
   {

@@ -465,7 +465,7 @@ export default function CombatToolkit({ products, practiceCards }: CombatToolkit
             id="tab-evidence-btn"
           >
             <span className={`w-4 h-4 rounded-xl text-[10px] flex items-center justify-center font-mono font-bold ${activeTab === 'evidence' ? 'bg-white/20 text-white' : 'bg-surface-container-high text-on-surface-variant'}`}>4</span>
-            匹配实践证据 ({matchedEvidenceCards.length})
+            匹配交付可信 ({matchedEvidenceCards.length})
           </button>
         </div>
 
@@ -766,7 +766,7 @@ export default function CombatToolkit({ products, practiceCards }: CombatToolkit
                       <div className="flex items-center justify-between border-b border-outline-variant/60 pb-3">
                         <h3 className="text-sm font-bold text-primary flex items-center gap-4">
                           <Sliders className="w-4 h-4 text-primary" />
-                          调机参考工艺窗口 (由实践云提供)
+                          调机参考工艺窗口 (由交付可信提供)
                         </h3>
                         <span className="text-[10px] text-on-surface-variant font-mono">100% 专家审核校准</span>
                       </div>
@@ -1033,10 +1033,10 @@ export default function CombatToolkit({ products, practiceCards }: CombatToolkit
                   <div>
                     <h3 className="text-sm font-bold text-primary flex items-center gap-2">
                       <Database className="w-5 h-5 text-primary" />
-                      对标实践云：车间真实打样与测试性能背书
+                      对标交付可信：车间真实打样与测试性能背书
                     </h3>
                     <p className="text-[11px] text-on-surface-variant mt-0.5 font-medium">
-                      海外买家极其注重技术细节。以下为系统从【实践云】证据库中精准检索并匹配的底材实烫证据：
+                      海外买家极其注重技术细节。以下为系统从【交付可信】证据库中精准检索并匹配的底材实烫证据：
                     </p>
                   </div>
                   <span className="text-[10px] bg-emerald-50 text-emerald-700 font-bold px-1.5 py-1.5 rounded-xl border border-emerald-200 font-mono">
@@ -1094,7 +1094,7 @@ export default function CombatToolkit({ products, practiceCards }: CombatToolkit
                     <div className="col-span-2 py-16 text-center text-on-surface-variant bg-surface-container-low border border-outline-variant/50 rounded-xl">
                       <HelpCircle className="w-12 h-12 text-on-surface-variant/40 mx-auto" />
                       <p className="text-sm font-bold text-on-surface mt-2">暂无完全对标的实践打样证据卡</p>
-                      <p className="text-xs">建议前往【实践云证据卡】模块创建一张包含该底材材质的真实打样测试记录。</p>
+                      <p className="text-xs">建议前往【可信云 / 交付可信】模块创建一张包含该底材材质的真实打样测试记录。</p>
                     </div>
                   )}
                 </div>
@@ -1107,7 +1107,7 @@ export default function CombatToolkit({ products, practiceCards }: CombatToolkit
                       已封装完整一键交付物方案报告
                     </h4>
                     <p className="text-[11px] text-on-surface-variant font-medium leading-relaxed">
-                      包含【底材风险诊断报告 + 主备推荐SKU技术规范 + 动态商务Quotation核算 + 实践云车间打样性能背书】。
+                      包含【底材风险诊断报告 + 主备推荐SKU技术规范 + 动态商务Quotation核算 + 交付可信车间打样性能背书】。
                     </p>
                   </div>
 

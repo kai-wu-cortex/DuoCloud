@@ -254,7 +254,7 @@ function collectKnowledgeAttachments(asset: KnowledgeAsset): KnowledgeAttachment
         type: 'practice',
         label: practiceMatch[0],
         href: `/evidence/${practiceMatch[0]}`,
-        meta: '关联实践云证据卡',
+        meta: '关联交付可信证据卡',
       });
     }
 

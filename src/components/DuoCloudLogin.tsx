@@ -42,7 +42,7 @@ export default function DuoCloudLogin({
                 PINTE 品特烫金膜知识实践两朵云平台
               </p>
               <p className="text-sm leading-6 text-slate-300">
-                使用系统账号密码登入，统一访问知识云标答库与实践云证据卡。
+                使用系统账号密码登入，统一访问知识云标答库与可信云证据链。
               </p>
             </div>
           </div>

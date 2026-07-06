@@ -748,7 +748,7 @@ export default function EvidenceApp() {
 
     return (
       <div className="space-y-2 border-t border-slate-200 pt-3">
-        <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide">实践云参数</span>
+        <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide">交付可信参数</span>
         <div className="grid grid-cols-2 gap-2">
           {controls.map(control => (
             <label key={control.key} className="rounded-lg border border-slate-200 bg-white p-2">
@@ -936,7 +936,7 @@ export default function EvidenceApp() {
             className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-50 hover:bg-slate-150 text-slate-700 font-semibold border border-slate-200 transition-all shadow-xs group"
           >
             <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
-            返回实践云
+            返回可信云
           </button>
           
           <span className="text-slate-300">/</span>

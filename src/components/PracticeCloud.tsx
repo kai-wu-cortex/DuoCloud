@@ -48,6 +48,7 @@ import { PracticeCard, KnowledgeAsset, KnowledgeTableType } from '../types';
 import { addDaysToDateString } from '../lib/appState';
 
 interface PracticeCloudProps {
+  module: 'marketing' | 'delivery';
   cards: PracticeCard[];
   knowledgeAssets: KnowledgeAsset[];
   onAddCard: (newCard: Omit<PracticeCard, 'id' | 'evidenceNo' | 'testDate'>) => void;
@@ -89,7 +90,7 @@ const getSwatchGradient = (sku: string) => {
   return 'from-slate-300 to-slate-200 text-slate-800';
 };
 
-export default function PracticeCloud({ cards, knowledgeAssets, onAddCard }: PracticeCloudProps) {
+export default function PracticeCloud({ module, cards, knowledgeAssets, onAddCard }: PracticeCloudProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSubstrate, setSelectedSubstrate] = useState<string>('all');
   const [selectedLevel, setSelectedLevel] = useState<string>('all');
@@ -233,6 +234,31 @@ export default function PracticeCloud({ cards, knowledgeAssets, onAddCard }: Pra
 
   // Automatically find selected card
   const activeCard = filteredCards.find(c => c.id === selectedCardId) || filteredCards[0] || cards[0] || null;
+  const isMarketingModule = module === 'marketing';
+  const moduleTitle = isMarketingModule ? '营销可信' : '交付可信';
+  const moduleSubtitle = isMarketingModule
+    ? '把客户触达、话术、素材和发布口径沉淀为可复核的营销证据链'
+    : '把打样、检测、交付和客户承诺沉淀为可追溯的交付证据链';
+  const marketingTrustModules = [
+    {
+      title: '客户触达可信',
+      desc: '沉淀询盘来源、客户画像、跟进节奏和关键异议，避免营销动作只停留在口头经验。',
+      icon: Users,
+      count: knowledgeAssets.filter(asset => /营销|客户|询盘|话术|展会/.test(`${asset.title} ${asset.tags.join(' ')}`)).length,
+    },
+    {
+      title: '素材发布可信',
+      desc: '将图片、海报、详情页、社媒文案和官网内容关联到来源知识卡，发布前可复核。',
+      icon: FileText,
+      count: knowledgeAssets.filter(asset => /素材|海报|详情页|官网|社媒|文案/.test(`${asset.title} ${asset.tags.join(' ')}`)).length,
+    },
+    {
+      title: '转化口径可信',
+      desc: '把推荐理由、风险边界、价格解释和交付条件统一到可调用的话术证据中。',
+      icon: Sparkles,
+      count: knowledgeAssets.filter(asset => /报价|风险|推荐|解决方案|转化/.test(`${asset.title} ${asset.tags.join(' ')}`)).length,
+    },
+  ];
 
   const renderStars = (score: number) => {
     return (
@@ -843,20 +869,20 @@ export default function PracticeCloud({ cards, knowledgeAssets, onAddCard }: Pra
           <div>
             <div className="flex items-center gap-2">
               <Database className="w-5 h-5 text-primary shrink-0" />
-              <h1 className="text-base font-black text-primary">实践云证据卡</h1>
+              <h1 className="text-base font-black text-primary">可信云 · {moduleTitle}</h1>
             </div>
             <div className="text-[10px] text-on-surface-variant flex items-center gap-4 mt-0.5 font-semibold">
               <span className="flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-xl bg-primary inline-block"></span> 
-                共 {cards.length} 条测试
+                {isMarketingModule ? `关联 ${marketingTrustModules.reduce((sum, item) => sum + item.count, 0)} 条营销知识` : `共 ${cards.length} 条交付测试`}
               </span>
               <span className="text-outline-variant">|</span>
-              <span>检索到 {filteredCards.length} 条记录</span>
+              <span>{isMarketingModule ? moduleSubtitle : `检索到 ${filteredCards.length} 条记录`}</span>
             </div>
           </div>
 
           {/* View Mode Toggle Group */}
-          <div className="inline-flex bg-surface-container-low p-1 rounded-xl border border-outline-variant/65 self-start md:self-auto">
+          {!isMarketingModule && <div className="inline-flex bg-surface-container-low p-1 rounded-xl border border-outline-variant/65 self-start md:self-auto">
             <button
               onClick={() => setViewMode('split')}
               className={`flex items-center gap-4 px-1.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
@@ -881,11 +907,11 @@ export default function PracticeCloud({ cards, knowledgeAssets, onAddCard }: Pra
               <LayoutGrid className="w-3.5 h-3.5" />
               <span>卡片视图</span>
             </button>
-          </div>
+          </div>}
         </div>
 
         {/* Right Side: Search, Filters, Add Button */}
-        <div className="flex flex-wrap items-center gap-2">
+        {!isMarketingModule && <div className="flex flex-wrap items-center gap-2">
           {/* Search bar */}
           <div className="relative min-w-[180px] sm:min-w-[240px] flex-1 sm:flex-initial">
             <Search className="absolute left-3 top-2.5 text-on-surface-variant w-4 h-4" />
@@ -932,13 +958,41 @@ export default function PracticeCloud({ cards, knowledgeAssets, onAddCard }: Pra
             id="add-practice-card-btn"
           >
             <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">录入测试实践</span>
+            <span className="hidden sm:inline">录入交付证据</span>
           </button>
-        </div>
+        </div>}
       </div>
 
       {/* Main Viewport */}
-      {viewMode === 'split' ? (
+      {isMarketingModule ? (
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-2 min-h-[500px]">
+          {marketingTrustModules.map(item => {
+            const Icon = item.icon;
+            return (
+              <div key={item.title} className="bg-white border border-outline-variant/80 rounded-xl p-5 shadow-sm flex flex-col gap-4">
+                <div className="w-11 h-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                  <Icon className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-black text-on-surface">{item.title}</h2>
+                  <p className="mt-2 text-xs font-semibold leading-relaxed text-on-surface-variant">{item.desc}</p>
+                </div>
+                <div className="mt-auto flex items-center justify-between rounded-xl border border-outline-variant/70 bg-surface-container-low px-3 py-2">
+                  <span className="text-[11px] font-bold text-on-surface-variant">可关联知识资产</span>
+                  <span className="text-sm font-black text-primary">{item.count}</span>
+                </div>
+              </div>
+            );
+          })}
+          <div className="xl:col-span-3 bg-white border border-dashed border-primary/30 rounded-xl p-6 text-center">
+            <Sparkles className="w-8 h-8 text-primary mx-auto" />
+            <h2 className="mt-3 text-base font-black text-on-surface">营销可信模块已就绪</h2>
+            <p className="mt-2 text-xs font-semibold text-on-surface-variant">
+              下一步可接入客户跟进记录、发布素材审批、展会话术复盘和转化证据，形成营销侧可信闭环。
+            </p>
+          </div>
+        </div>
+      ) : viewMode === 'split' ? (
         /* Split Layout Container */
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-2 items-stretch h-[calc(100vh-11rem)] md:h-[calc(100vh-10.5rem)] min-h-[500px] w-full">
           
@@ -1016,7 +1070,7 @@ export default function PracticeCloud({ cards, knowledgeAssets, onAddCard }: Pra
               ) : (
                 <div className="py-20 text-center space-y-2.5">
                   <Database className="w-12 h-12 text-on-surface-variant/40 mx-auto" />
-                  <p className="text-xs font-bold text-on-surface">没有查到符合筛选条件的实践证据卡</p>
+                  <p className="text-xs font-bold text-on-surface">没有查到符合筛选条件的交付可信证据卡</p>
                   <p className="text-[11px] text-on-surface-variant">建议重新输入关键词或重置筛选条件</p>
                 </div>
               )}
@@ -1173,7 +1227,7 @@ export default function PracticeCloud({ cards, knowledgeAssets, onAddCard }: Pra
           ) : (
             <div className="py-24 text-center space-y-3 bg-white border border-outline-variant rounded-xl shadow-sm">
               <Database className="w-12 h-12 text-on-surface-variant/40 mx-auto" />
-              <p className="text-xs font-bold text-on-surface">没有查到符合筛选条件的实践证据卡</p>
+              <p className="text-xs font-bold text-on-surface">没有查到符合筛选条件的交付可信证据卡</p>
               <p className="text-[11px] text-on-surface-variant">建议重新输入关键词或重置筛选条件</p>
             </div>
           )}
@@ -1238,7 +1292,7 @@ export default function PracticeCloud({ cards, knowledgeAssets, onAddCard }: Pra
             <div className="px-1.5 py-2 bg-surface-container-low border-b border-outline-variant flex items-center justify-between">
               <h3 className="font-bold text-primary text-sm flex items-center gap-2">
                 <PlusCircle className="w-5 h-5 text-primary" />
-                录入全新打样测试结果（实践云）
+                录入全新打样测试结果（交付可信）
               </h3>
               <button onClick={() => setIsModalOpen(false)} className="text-on-surface-variant hover:text-on-surface">
                 <X className="w-5 h-5" />

@@ -88,7 +88,7 @@ export const KNOWLEDGE_FIELD_SCHEMAS: Record<KnowledgeTableType, KnowledgeFieldS
       { name: 'pressureRange', label: '压力范围', placeholder: '例如：中压 / 45-55kg' },
       { name: 'speedRange', label: '速度范围', placeholder: '例如：3500-4000印/小时' },
       { name: 'requiresTesting', label: '是否必须打样', type: 'select', options: ['是', '否', '视项目而定'] },
-      { name: 'relatedPracticeCases', label: '关联实践云案例', placeholder: '例如：SY-2026-0042' },
+      { name: 'relatedPracticeCases', label: '关联交付可信案例', placeholder: '例如：SY-2026-0042' },
       { name: 'salesPitch', label: '销售推荐话术', type: 'textarea' },
       { name: 'reviewer', label: '审核人' },
     ],

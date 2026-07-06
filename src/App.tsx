@@ -10,6 +10,7 @@ import {
   Database, 
   Cpu, 
   Workflow, 
+  Megaphone,
   Menu,
   X,
   ChevronLeft,
@@ -47,6 +48,8 @@ import {
 const CombatToolkit = lazy(() => import('./components/CombatToolkit'));
 const KnowledgeCloud = lazy(() => import('./components/KnowledgeCloud'));
 const PracticeCloud = lazy(() => import('./components/PracticeCloud'));
+
+type TrustedCloudModule = 'marketing' | 'delivery';
 
 const DIFY_CHATBOT_TOKEN = 'Pqyg8S5HUiWNYD72';
 const DIFY_EMBED_SRC = 'https://udify.app/embed.min.js';
@@ -361,6 +364,7 @@ export default function App() {
   const initialTab = (urlTab === 'toolkit' || urlTab === 'knowledge' || urlTab === 'practice') ? urlTab : 'toolkit';
 
   const [activeTab, setActiveTab] = useState<'toolkit' | 'knowledge' | 'practice'>(initialTab);
+  const [trustedCloudModule, setTrustedCloudModule] = useState<TrustedCloudModule>('delivery');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [authStatus, setAuthStatus] = useState<'checking' | 'authenticated' | 'unauthenticated'>('checking');
@@ -526,7 +530,11 @@ export default function App() {
   const navItems = [
     { id: 'toolkit', label: '前线销售作战箱', desc: 'Workbench', icon: Cpu },
     { id: 'knowledge', label: '知识云标答库', desc: 'Knowledge Cloud', icon: BookOpen },
-    { id: 'practice', label: '实践云证据卡', desc: 'Practice Cloud', icon: Database },
+    { id: 'practice', label: '可信云', desc: 'Trusted Cloud', icon: Database },
+  ] as const;
+  const trustedCloudModules = [
+    { id: 'marketing', label: '营销可信', desc: 'Marketing Trust', icon: Megaphone },
+    { id: 'delivery', label: '交付可信', desc: 'Delivery Trust', icon: Database },
   ] as const;
 
   useEffect(() => {
@@ -674,32 +682,66 @@ export default function App() {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
               return (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    setActiveTab(item.id);
-                    setIsMobileMenuOpen(false);
-                  }}
-                  className={`w-full flex items-center transition-all duration-150 text-left ${
-                    isSidebarCollapsed 
-                      ? 'md:px-0 md:justify-center md:h-11 md:w-11 md:mx-auto gap-0 px-4 py-1.5 rounded-xl' 
-                      : 'gap-4 px-4 py-1.5 rounded-xl'
-                  } ${
-                    isActive 
-                      ? 'bg-primary text-white font-semibold shadow-md shadow-primary/15 md:translate-x-0' 
-                      : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
-                  }`}
-                  title={isSidebarCollapsed ? item.label : undefined}
-                  id={`nav-${item.id}-btn`}
-                >
-                  <Icon className={`w-5 h-5 shrink-0 ${isActive ? 'text-white' : 'text-on-surface-variant/80'}`} />
-                  <div className={isSidebarCollapsed ? 'md:hidden block' : 'block'}>
-                    <div className="text-[13px] font-bold leading-none">{item.label}</div>
-                    <div className={`text-[10px] mt-0.5 ${isActive ? 'text-white/70' : 'text-on-surface-variant/60 font-mono'}`}>
-                      {item.desc}
+                <div key={item.id}>
+                  <button
+                    onClick={() => {
+                      setActiveTab(item.id);
+                      if (item.id !== 'practice') {
+                        setIsMobileMenuOpen(false);
+                      }
+                    }}
+                    className={`w-full flex items-center transition-all duration-150 text-left ${
+                      isSidebarCollapsed 
+                        ? 'md:px-0 md:justify-center md:h-11 md:w-11 md:mx-auto gap-0 px-4 py-1.5 rounded-xl' 
+                        : 'gap-4 px-4 py-1.5 rounded-xl'
+                    } ${
+                      isActive 
+                        ? 'bg-primary text-white font-semibold shadow-md shadow-primary/15 md:translate-x-0' 
+                        : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+                    }`}
+                    title={isSidebarCollapsed ? item.label : undefined}
+                    id={`nav-${item.id}-btn`}
+                  >
+                    <Icon className={`w-5 h-5 shrink-0 ${isActive ? 'text-white' : 'text-on-surface-variant/80'}`} />
+                    <div className={isSidebarCollapsed ? 'md:hidden block' : 'block'}>
+                      <div className="text-[13px] font-bold leading-none">{item.label}</div>
+                      <div className={`text-[10px] mt-0.5 ${isActive ? 'text-white/70' : 'text-on-surface-variant/60 font-mono'}`}>
+                        {item.desc}
+                      </div>
                     </div>
-                  </div>
-                </button>
+                  </button>
+                  {item.id === 'practice' && isActive && (
+                    <div className={`mt-1.5 space-y-1 ${isSidebarCollapsed ? 'md:hidden' : 'pl-6'}`}>
+                      {trustedCloudModules.map(module => {
+                        const ModuleIcon = module.icon;
+                        const moduleActive = trustedCloudModule === module.id;
+                        return (
+                          <button
+                            key={module.id}
+                            type="button"
+                            onClick={() => {
+                              setTrustedCloudModule(module.id);
+                              setActiveTab('practice');
+                              setIsMobileMenuOpen(false);
+                            }}
+                            className={`w-full flex items-center gap-3 rounded-xl px-3 py-2 text-left transition ${
+                              moduleActive
+                                ? 'bg-primary/10 text-primary border border-primary/15'
+                                : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
+                            }`}
+                            id={`nav-trusted-${module.id}-btn`}
+                          >
+                            <ModuleIcon className="w-4 h-4 shrink-0" />
+                            <div className="min-w-0">
+                              <div className="text-[12px] font-black leading-none">{module.label}</div>
+                              <div className="text-[9px] font-mono opacity-60 mt-0.5">{module.desc}</div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               );
             })}
           </nav>
@@ -797,6 +839,7 @@ export default function App() {
             )}
             {activeTab === 'practice' && (
               <PracticeCloud 
+                module={trustedCloudModule}
                 cards={practiceCards} 
                 knowledgeAssets={knowledgeAssets}
                 onAddCard={handleAddPracticeCard} 
