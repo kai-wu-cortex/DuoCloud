@@ -184,10 +184,14 @@ function collectKeywords(asset: KnowledgeAsset, title: string, text: string) {
 export function curateKnowledgeAsset(asset: KnowledgeAsset): KnowledgeAsset {
   const title = cleanTitle(asset.title, asset);
   const sourceContent = asset.originalMarkdown || getSourceContent(asset.content);
+  const attachmentSourceContent = [
+    getSourceContent(asset.content),
+    sourceContent,
+  ].filter(Boolean).join('\n\n');
   const text = getPlainText(sourceContent);
   const importantLines = pickImportantLines(text, title);
   const fieldRows = buildFieldRows(asset);
-  const images = extractImageTags(sourceContent);
+  const images = extractImageTags(attachmentSourceContent);
   const sourceTables = extractMarkdownTables(sourceContent);
   const source = asset.sourcePath || [asset.directoryLevel1, asset.directoryLevel2, asset.directoryLevel3].filter(Boolean).join(' / ') || '系统录入';
 

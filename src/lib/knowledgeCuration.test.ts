@@ -59,6 +59,31 @@ test('curates knowledge content into a readable industrial card', () => {
   assert.equal(curated.tags.includes('人工可读'), true);
 });
 
+test('preserves resolved attachment images when original markdown is raw obsidian content', () => {
+  const curated = curateKnowledgeAsset({
+    ...baseAsset,
+    content: [
+      '涂层附着力的影响因素',
+      '',
+      '<img src="/obsidian-assets/adhesion.jpg" alt="涂层附着力" />',
+      '',
+      '涂层附着力会受底材表面能影响。',
+    ].join('\n'),
+    originalMarkdown: [
+      '# 涂层附着力的影响因素',
+      '',
+      '![[adhesion.jpg]]',
+      '',
+      '涂层附着力会受底材表面能影响。',
+    ].join('\n'),
+  });
+
+  assert.equal(curated.content.includes('## 图片资料'), true);
+  assert.equal(curated.content.includes('<img src="/obsidian-assets/adhesion.jpg"'), true);
+  assert.equal(curated.content.includes('## 原始文章'), true);
+  assert.equal(curated.content.includes('![[adhesion.jpg]]'), true);
+});
+
 test('curation is stable when applied more than once', () => {
   const once = curateKnowledgeAsset(baseAsset);
   const twice = curateKnowledgeAsset(once);
