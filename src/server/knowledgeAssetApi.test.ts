@@ -557,6 +557,50 @@ test('bulk import logs import jobs, updates changed assets, skips unchanged asse
   assert.deepEqual(importJobs.documents[0].counts, data.counts);
 });
 
+test('obsidian bulk import preserves existing blob image urls', async () => {
+  const blobUrl = 'https://example.public.blob.vercel-storage.com/knowledge-assets/obsidian-migrated/abc123/银色.webp';
+  const existing = applyKnowledgeAssetUpdate({
+    ...governanceAsset,
+    content: [
+      '## 图片资料',
+      `<img src="${blobUrl}" alt="银色" />`,
+      '## 原始文章',
+      `![](${blobUrl})`,
+    ].join('\n\n'),
+  }, {
+    actor: adminUser,
+    now: new Date('2026-07-01T01:00:00.000Z'),
+    source: 'obsidian_import',
+  });
+  const incoming = {
+    ...governanceAsset,
+    content: [
+      '## 图片资料',
+      '<img src="/obsidian-assets/ABC123-银色.jpg" alt="银色" />',
+      '## 原始文章',
+      '![[银色.jpg]]',
+    ].join('\n\n'),
+  };
+  const { assets } = setupCollections({ assets: [existing] });
+
+  const req = createRequest({
+    method: 'POST',
+    headers: createAuthHeaders(adminUser),
+    body: {
+      source: 'obsidian_import',
+      input: 'obsidian-sync-preserve-blob-images',
+      assets: [incoming],
+    },
+  });
+  const { res, state } = createMockResponse();
+  await handleKnowledgeAssetBulkRequest(req, res);
+
+  assert.equal(state.statusCode, 200);
+  const stored = assets.documents.find(asset => asset._id === governanceAsset.id);
+  assert.equal(stored?.content.includes(blobUrl), true);
+  assert.equal(stored?.content.includes('/obsidian-assets/ABC123-银色.jpg'), false);
+});
+
 test('agent bearer token can bulk upsert and export knowledge assets', async () => {
   process.env.DUOCLOUD_AGENT_API_TOKEN = 'agent-secret';
   const { revisions } = setupCollections();

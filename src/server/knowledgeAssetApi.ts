@@ -294,6 +294,102 @@ function isSameKnowledgeAssetContent(
     === JSON.stringify(stripServerManagedKnowledgeAssetFields(incoming));
 }
 
+function decodeUriComponentSafe(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function getReferenceFileName(value: string): string {
+  const cleanValue = decodeUriComponentSafe(value)
+    .split(/[?#]/)[0]
+    .replace(/^file:\/\//i, '')
+    .trim();
+  return cleanValue.split(/[\\/]/).filter(Boolean).at(-1) || cleanValue;
+}
+
+function normalizeImageReferenceKey(value: string): string {
+  let fileName = getReferenceFileName(value)
+    .replace(/^[A-Z0-9]+-/, '')
+    .toLowerCase();
+  for (let index = 0; index < 2; index += 1) {
+    fileName = fileName.replace(/\.(png|jpe?g|webp|avif|gif|svg|tiff?)$/i, '');
+  }
+  return fileName.normalize('NFKC').replace(/\s+/g, ' ').trim();
+}
+
+function isBlobImageReference(value: string): boolean {
+  return /vercel-storage\.com/i.test(value) || /^https:\/\/[^/\s]+\/knowledge-assets\//i.test(value);
+}
+
+function extractImageReferenceTokens(value: string): string[] {
+  const tokens: string[] = [];
+  const patterns = [
+    /<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi,
+    /!\[[^\]]*]\(([^)]+)\)/g,
+    /!\[\[([^\]]+\.(?:png|jpe?g|webp|avif|gif|svg|tiff?))(?:\|[^\]]*)?]]/gi,
+    /(\/obsidian-assets\/[^\s<>"')]+)/gi,
+    /((?:[A-Za-z]:)?\/[^\n<>"'|]+\.(?:png|jpe?g|webp|avif|gif|svg|tiff?))/gi,
+  ];
+
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(value)) !== null) {
+      const token = (match[1] || '').trim();
+      if (token) tokens.push(token);
+    }
+  }
+  return tokens;
+}
+
+function buildExistingBlobImageUrlMap(existing: KnowledgeAssetDocument): Map<string, string> {
+  const blobByImageKey = new Map<string, string>();
+  for (const value of Object.values(existing)) {
+    if (typeof value !== 'string') continue;
+    for (const token of extractImageReferenceTokens(value)) {
+      if (!isBlobImageReference(token)) continue;
+      const key = normalizeImageReferenceKey(token);
+      if (key && !blobByImageKey.has(key)) blobByImageKey.set(key, token);
+    }
+  }
+  return blobByImageKey;
+}
+
+function preserveExistingBlobImageUrls(
+  incoming: KnowledgeAsset,
+  existing: KnowledgeAssetDocument | null,
+  source: KnowledgeAssetSource,
+): KnowledgeAsset {
+  if (source !== 'obsidian_import' || !existing || existing.serverStatus === 'archived' || existing.serverDeletedAt) {
+    return incoming;
+  }
+
+  const blobByImageKey = buildExistingBlobImageUrlMap(existing);
+  if (blobByImageKey.size === 0) return incoming;
+
+  const next = { ...incoming } as unknown as Record<string, unknown>;
+  let changed = false;
+
+  for (const [field, value] of Object.entries(next)) {
+    if (typeof value !== 'string') continue;
+    let nextValue = value;
+    for (const token of extractImageReferenceTokens(value)) {
+      if (isBlobImageReference(token)) continue;
+      const blobUrl = blobByImageKey.get(normalizeImageReferenceKey(token));
+      if (!blobUrl) continue;
+      nextValue = nextValue.split(token).join(blobUrl);
+    }
+    if (nextValue !== value) {
+      next[field] = nextValue;
+      changed = true;
+    }
+  }
+
+  return changed ? next as unknown as KnowledgeAsset : incoming;
+}
+
 async function getKnowledgeAssetsCollection(): Promise<KnowledgeAssetCollectionLike<KnowledgeAssetDocument>> {
   if (collectionResolversForTests?.knowledgeAssets) {
     return collectionResolversForTests.knowledgeAssets();
@@ -554,11 +650,15 @@ async function upsertKnowledgeAsset(
   if (existingBySourcePath) {
     return { status: 'skipped', asset: existingBySourcePath };
   }
-  const asset = applyKnowledgeAccessPolicy(rawNormalizedAsset, {
-    actor: options.actor,
-    source: options.source,
+  const asset = preserveExistingBlobImageUrls(
+    applyKnowledgeAccessPolicy(rawNormalizedAsset, {
+      actor: options.actor,
+      source: options.source,
+      existing,
+    }),
     existing,
-  });
+    options.source,
+  );
 
   if (
     existing

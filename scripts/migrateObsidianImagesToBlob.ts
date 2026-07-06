@@ -54,20 +54,14 @@ function isBlankEnv(value: string | undefined) {
 
 function loadEnvFiles() {
   config({ path: '.env.local', override: true, quiet: true });
-  config({ path: '.env.vercel.local', override: true, quiet: true });
-  config({ path: '.env.vercel.production.local', override: true, quiet: true });
+  config({ path: '.env.vercel.local', override: false, quiet: true });
+  config({ path: '.env.vercel.production.local', override: false, quiet: true });
+  config({ path: '.vercel/.env.production.local', override: false, quiet: true });
   for (const key of ['MONGODB_URI', 'MONGODB_DIRECT_URI', 'SESSION_SECRET', 'BLOB_READ_WRITE_TOKEN']) {
     if (isBlankEnv(process.env[key])) delete process.env[key];
   }
   if (isBlankEnv(process.env.MONGODB_URI) && !isBlankEnv(process.env.BUYER_MONGO_MONGODB_URI)) {
     process.env.MONGODB_URI = process.env.BUYER_MONGO_MONGODB_URI;
-  }
-  if (isBlankEnv(process.env.MONGODB_DIRECT_URI) && !isBlankEnv(process.env.MONGODB_URI)) {
-    const directUri = buildAtlasDirectUriFromSrv(process.env.MONGODB_URI as string);
-    if (directUri) {
-      process.env.MONGODB_DIRECT_URI = directUri;
-      process.env.MONGODB_URI = directUri;
-    }
   }
   process.env.KNOWLEDGE_DB_NAME = 'duocloudDB';
 }
@@ -211,17 +205,29 @@ function isBlobUrl(value: string) {
 
 function extractImageReferences(value: string) {
   const references = new Set<string>();
+  if (!/(<img|!\[|!\[\[|\/obsidian-assets\/|\.(?:png|jpe?g|webp|avif|gif|svg|tiff?))/i.test(value)) {
+    return [];
+  }
   const patterns = [
     /<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi,
     /!\[[^\]]*]\(([^)]+)\)/g,
     /!\[\[([^\]]+\.(?:png|jpe?g|webp|avif|gif|svg|tiff?))(?:\|[^\]]*)?]]/gi,
     /(\/obsidian-assets\/[^\s<>"')]+)/gi,
-    /((?:[A-Za-z]:)?\/[^\n<>"'|]+\.(?:png|jpe?g|webp|avif|gif|svg|tiff?))/gi,
   ];
 
   for (const pattern of patterns) {
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(value)) !== null) {
+      const candidate = (match[1] || '').trim();
+      if (candidate && !isBlobUrl(candidate)) references.add(candidate);
+    }
+  }
+
+  for (const line of value.split('\n')) {
+    if (line.length > 800 || !/\.(?:png|jpe?g|webp|avif|gif|svg|tiff?)/i.test(line)) continue;
+    const pathPattern = /((?:[A-Za-z]:)?\/[^\n<>"'|]+\.(?:png|jpe?g|webp|avif|gif|svg|tiff?))/gi;
+    let match: RegExpExecArray | null;
+    while ((match = pathPattern.exec(line)) !== null) {
       const candidate = (match[1] || '').trim();
       if (candidate && !isBlobUrl(candidate)) references.add(candidate);
     }
@@ -457,10 +463,10 @@ async function main() {
 
   const lookup = buildImageLookup(vaultPath);
   const collection = await getMongoCollection<KnowledgeAssetDocument>(KNOWLEDGE_COLLECTION);
-  const assets = await collection.find({
+  const assetCursor = collection.find({
     serverStatus: { $ne: 'archived' },
     serverDeletedAt: { $exists: false },
-  }).sort({ serverUpdatedAt: -1, _id: 1 }).toArray();
+  }).batchSize(10);
 
   const uploadCache = new Map<string, Promise<PreparedUpload & { url: string; pathname: string }>>();
   const updatedAssets: KnowledgeAsset[] = [];
@@ -472,8 +478,18 @@ async function main() {
   let uploadAttempt = 0;
   const uploadFailures: Array<{ assetId: string; title: string; reference: string; message: string }> = [];
   let cleanedMissingReferenceCount = 0;
+  let scannedAssets = 0;
 
-  for (const asset of assets) {
+  for await (const asset of assetCursor) {
+    scannedAssets += 1;
+    if (scannedAssets % 100 === 0) {
+      console.log(JSON.stringify({
+        scannedAssets,
+        matchedReferences: matchedReferences.length,
+        updatedAssets: updatedAssets.length,
+        missingReferenceCount: missing.length,
+      }));
+    }
     const replacements = new Map<string, string>();
     const missingByField = new Map<string, string[]>();
     const stringEntries = getStringFieldEntries(asset);
@@ -566,7 +582,7 @@ async function main() {
     mode: apply ? 'apply' : 'dry-run',
     cleanupMissing,
     vaultPath,
-    scannedAssets: assets.length,
+    scannedAssets,
     localImagesIndexed: lookup.images.length,
     matchedReferences: matchedReferences.length,
     uniqueMatchedFiles: uniqueMatchedFiles.size,
