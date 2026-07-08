@@ -19,7 +19,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   Bookmark,
-  Sparkles,
   Info,
   Download,
   Share2,
@@ -36,8 +35,6 @@ import {
   Clock,
   Star,
   Paperclip,
-  Users,
-  Layers,
   Droplet,
   ArrowUpRight,
   Heart,
@@ -46,12 +43,16 @@ import {
 } from 'lucide-react';
 import { PracticeCard, KnowledgeAsset, KnowledgeTableType } from '../types';
 import { addDaysToDateString } from '../lib/appState';
+import MarketingTrustWorkspace from './MarketingTrustWorkspace';
+import type { MarketingView } from './MarketingTrustWorkspace';
 
 interface PracticeCloudProps {
   module: 'marketing' | 'delivery';
+  marketingView: MarketingView;
   cards: PracticeCard[];
   knowledgeAssets: KnowledgeAsset[];
   onAddCard: (newCard: Omit<PracticeCard, 'id' | 'evidenceNo' | 'testDate'>) => void;
+  onMarketingViewChange: (view: MarketingView) => void;
 }
 
 interface ActivityLogEntry {
@@ -90,7 +91,14 @@ const getSwatchGradient = (sku: string) => {
   return 'from-slate-300 to-slate-200 text-slate-800';
 };
 
-export default function PracticeCloud({ module, cards, knowledgeAssets, onAddCard }: PracticeCloudProps) {
+export default function PracticeCloud({
+  module,
+  marketingView,
+  cards,
+  knowledgeAssets,
+  onAddCard,
+  onMarketingViewChange,
+}: PracticeCloudProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSubstrate, setSelectedSubstrate] = useState<string>('all');
   const [selectedLevel, setSelectedLevel] = useState<string>('all');
@@ -236,29 +244,6 @@ export default function PracticeCloud({ module, cards, knowledgeAssets, onAddCar
   const activeCard = filteredCards.find(c => c.id === selectedCardId) || filteredCards[0] || cards[0] || null;
   const isMarketingModule = module === 'marketing';
   const moduleTitle = isMarketingModule ? '营销可信' : '交付可信';
-  const moduleSubtitle = isMarketingModule
-    ? '把客户触达、话术、素材和发布口径沉淀为可复核的营销证据链'
-    : '把打样、检测、交付和客户承诺沉淀为可追溯的交付证据链';
-  const marketingTrustModules = [
-    {
-      title: '客户触达可信',
-      desc: '沉淀询盘来源、客户画像、跟进节奏和关键异议，避免营销动作只停留在口头经验。',
-      icon: Users,
-      count: knowledgeAssets.filter(asset => /营销|客户|询盘|话术|展会/.test(`${asset.title} ${asset.tags.join(' ')}`)).length,
-    },
-    {
-      title: '素材发布可信',
-      desc: '将图片、海报、详情页、社媒文案和官网内容关联到来源知识卡，发布前可复核。',
-      icon: FileText,
-      count: knowledgeAssets.filter(asset => /素材|海报|详情页|官网|社媒|文案/.test(`${asset.title} ${asset.tags.join(' ')}`)).length,
-    },
-    {
-      title: '转化口径可信',
-      desc: '把推荐理由、风险边界、价格解释和交付条件统一到可调用的话术证据中。',
-      icon: Sparkles,
-      count: knowledgeAssets.filter(asset => /报价|风险|推荐|解决方案|转化/.test(`${asset.title} ${asset.tags.join(' ')}`)).length,
-    },
-  ];
 
   const renderStars = (score: number) => {
     return (
@@ -863,6 +848,7 @@ export default function PracticeCloud({ module, cards, knowledgeAssets, onAddCar
       </AnimatePresence>
 
       {/* 1. Unified Control Toolbar */}
+      {!isMarketingModule && (
       <div className="bg-white border border-outline-variant/85 rounded-xl p-4 shadow-sm flex flex-col xl:flex-row xl:items-center justify-between gap-2 shrink-0">
         {/* Left Side: Title + Stats + View Mode Switcher */}
         <div className="flex flex-col md:flex-row md:items-center gap-2.5">
@@ -874,10 +860,10 @@ export default function PracticeCloud({ module, cards, knowledgeAssets, onAddCar
             <div className="text-[10px] text-on-surface-variant flex items-center gap-4 mt-0.5 font-semibold">
               <span className="flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-xl bg-primary inline-block"></span> 
-                {isMarketingModule ? `关联 ${marketingTrustModules.reduce((sum, item) => sum + item.count, 0)} 条营销知识` : `共 ${cards.length} 条交付测试`}
+                共 {cards.length} 条交付测试
               </span>
               <span className="text-outline-variant">|</span>
-              <span>{isMarketingModule ? moduleSubtitle : `检索到 ${filteredCards.length} 条记录`}</span>
+              <span>检索到 {filteredCards.length} 条记录</span>
             </div>
           </div>
 
@@ -962,36 +948,17 @@ export default function PracticeCloud({ module, cards, knowledgeAssets, onAddCar
           </button>
         </div>}
       </div>
+      )}
 
       {/* Main Viewport */}
       {isMarketingModule ? (
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-2 min-h-[500px]">
-          {marketingTrustModules.map(item => {
-            const Icon = item.icon;
-            return (
-              <div key={item.title} className="bg-white border border-outline-variant/80 rounded-xl p-5 shadow-sm flex flex-col gap-4">
-                <div className="w-11 h-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-                  <Icon className="w-5 h-5" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-black text-on-surface">{item.title}</h2>
-                  <p className="mt-2 text-xs font-semibold leading-relaxed text-on-surface-variant">{item.desc}</p>
-                </div>
-                <div className="mt-auto flex items-center justify-between rounded-xl border border-outline-variant/70 bg-surface-container-low px-3 py-2">
-                  <span className="text-[11px] font-bold text-on-surface-variant">可关联知识资产</span>
-                  <span className="text-sm font-black text-primary">{item.count}</span>
-                </div>
-              </div>
-            );
-          })}
-          <div className="xl:col-span-3 bg-white border border-dashed border-primary/30 rounded-xl p-6 text-center">
-            <Sparkles className="w-8 h-8 text-primary mx-auto" />
-            <h2 className="mt-3 text-base font-black text-on-surface">营销可信模块已就绪</h2>
-            <p className="mt-2 text-xs font-semibold text-on-surface-variant">
-              下一步可接入客户跟进记录、发布素材审批、展会话术复盘和转化证据，形成营销侧可信闭环。
-            </p>
-          </div>
-        </div>
+        <MarketingTrustWorkspace
+          cards={cards}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          activeView={marketingView}
+          onActiveViewChange={onMarketingViewChange}
+        />
       ) : viewMode === 'split' ? (
         /* Split Layout Container */
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-2 items-stretch h-[calc(100vh-11rem)] md:h-[calc(100vh-10.5rem)] min-h-[500px] w-full">

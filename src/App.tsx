@@ -7,17 +7,26 @@ import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 
 import { createPortal } from 'react-dom';
 import { 
   BookOpen, 
+  Cloud,
+  ClipboardCheck,
   Database, 
   Cpu, 
+  FileText,
+  Image as ImageIcon,
+  ListChecks,
   Workflow, 
   Megaphone,
+  MessageSquareText,
   Menu,
   X,
   ChevronLeft,
   ChevronRight,
   LogOut,
   MessageCircle,
+  Send,
+  Tags,
   UserRound,
+  Video,
   Maximize2
 } from 'lucide-react';
 
@@ -44,12 +53,25 @@ import {
   listKnowledgeAssets,
   updateRemoteKnowledgeAsset,
 } from './lib/knowledgeApi';
+import type { MarketingView } from './components/MarketingTrustWorkspace';
 
 const CombatToolkit = lazy(() => import('./components/CombatToolkit'));
 const KnowledgeCloud = lazy(() => import('./components/KnowledgeCloud'));
 const PracticeCloud = lazy(() => import('./components/PracticeCloud'));
 
 type TrustedCloudModule = 'marketing' | 'delivery';
+const MARKETING_TRUST_VIEW_IDS: MarketingView[] = [
+  'overview',
+  'primary',
+  'scene',
+  'compare',
+  'video',
+  'report',
+  'review',
+  'tags',
+  'publish',
+  'questions',
+];
 
 const DIFY_CHATBOT_TOKEN = 'Pqyg8S5HUiWNYD72';
 const DIFY_EMBED_SRC = 'https://udify.app/embed.min.js';
@@ -361,10 +383,19 @@ export default function App() {
   // Read tab parameter from URL query string
   const queryParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const urlTab = queryParams.get('tab');
+  const urlModule = queryParams.get('module');
+  const urlMarketingView = queryParams.get('view');
   const initialTab = (urlTab === 'toolkit' || urlTab === 'knowledge' || urlTab === 'practice') ? urlTab : 'toolkit';
+  const initialTrustedCloudModule: TrustedCloudModule = urlModule === 'marketing' || urlModule === 'delivery'
+    ? urlModule
+    : 'delivery';
+  const initialMarketingTrustView: MarketingView = MARKETING_TRUST_VIEW_IDS.includes(urlMarketingView as MarketingView)
+    ? urlMarketingView as MarketingView
+    : 'overview';
 
   const [activeTab, setActiveTab] = useState<'toolkit' | 'knowledge' | 'practice'>(initialTab);
-  const [trustedCloudModule, setTrustedCloudModule] = useState<TrustedCloudModule>('delivery');
+  const [trustedCloudModule, setTrustedCloudModule] = useState<TrustedCloudModule>(initialTrustedCloudModule);
+  const [marketingTrustView, setMarketingTrustView] = useState<MarketingView>(initialMarketingTrustView);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [authStatus, setAuthStatus] = useState<'checking' | 'authenticated' | 'unauthenticated'>('checking');
@@ -536,6 +567,33 @@ export default function App() {
     { id: 'marketing', label: '营销可信', desc: 'Marketing Trust', icon: Megaphone },
     { id: 'delivery', label: '交付可信', desc: 'Delivery Trust', icon: Database },
   ] as const;
+  const marketingTrustViews: Array<{ id: MarketingView; label: string; icon: React.ComponentType<{ className?: string }> }> = [
+    { id: 'overview', label: '总览', icon: Cloud },
+    { id: 'primary', label: '证据主表', icon: Database },
+    { id: 'scene', label: '场景证据卡', icon: ClipboardCheck },
+    { id: 'compare', label: '对比证据图', icon: ImageIcon },
+    { id: 'video', label: '过程短视频', icon: Video },
+    { id: 'report', label: '可信报告', icon: FileText },
+    { id: 'review', label: '素材审核', icon: ListChecks },
+    { id: 'tags', label: '标签体系', icon: Tags },
+    { id: 'publish', label: '发布中心', icon: Send },
+    { id: 'questions', label: '客户问题库', icon: MessageSquareText },
+  ];
+
+  const practiceSearchFor = (module: TrustedCloudModule, view: MarketingView = marketingTrustView) => (
+    module === 'marketing'
+      ? `?tab=practice&module=marketing&view=${view}`
+      : '?tab=practice&module=delivery'
+  );
+
+  const handleMarketingTrustViewChange = (view: MarketingView) => {
+    setMarketingTrustView(view);
+    setTrustedCloudModule('marketing');
+    setActiveTab('practice');
+    if (typeof window !== 'undefined') {
+      window.history.replaceState(null, '', practiceSearchFor('marketing', view));
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -686,6 +744,12 @@ export default function App() {
                   <button
                     onClick={() => {
                       setActiveTab(item.id);
+                      if (typeof window !== 'undefined') {
+                        const nextSearch = item.id === 'practice'
+                          ? practiceSearchFor(trustedCloudModule)
+                          : `?tab=${item.id}`;
+                        window.history.replaceState(null, '', nextSearch);
+                      }
                       if (item.id !== 'practice') {
                         setIsMobileMenuOpen(false);
                       }
@@ -716,27 +780,60 @@ export default function App() {
                         const ModuleIcon = module.icon;
                         const moduleActive = trustedCloudModule === module.id;
                         return (
-                          <button
-                            key={module.id}
-                            type="button"
-                            onClick={() => {
-                              setTrustedCloudModule(module.id);
-                              setActiveTab('practice');
-                              setIsMobileMenuOpen(false);
-                            }}
-                            className={`w-full flex items-center gap-3 rounded-xl px-3 py-2 text-left transition ${
-                              moduleActive
-                                ? 'bg-primary/10 text-primary border border-primary/15'
-                                : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
-                            }`}
-                            id={`nav-trusted-${module.id}-btn`}
-                          >
-                            <ModuleIcon className="w-4 h-4 shrink-0" />
-                            <div className="min-w-0">
-                              <div className="text-[12px] font-black leading-none">{module.label}</div>
-                              <div className="text-[9px] font-mono opacity-60 mt-0.5">{module.desc}</div>
-                            </div>
-                          </button>
+                          <div key={module.id} className="space-y-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTrustedCloudModule(module.id);
+                                setActiveTab('practice');
+                                if (typeof window !== 'undefined') {
+                                  window.history.replaceState(null, '', practiceSearchFor(module.id));
+                                }
+                                if (module.id === 'delivery') {
+                                  setIsMobileMenuOpen(false);
+                                }
+                              }}
+                              className={`w-full flex items-center gap-3 rounded-xl px-3 py-2 text-left transition ${
+                                moduleActive
+                                  ? 'bg-primary/10 text-primary border border-primary/15'
+                                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
+                              }`}
+                              id={`nav-trusted-${module.id}-btn`}
+                            >
+                              <ModuleIcon className="w-4 h-4 shrink-0" />
+                              <div className="min-w-0">
+                                <div className="text-[12px] font-black leading-none">{module.label}</div>
+                                <div className="text-[9px] font-mono opacity-60 mt-0.5">{module.desc}</div>
+                              </div>
+                            </button>
+                            {module.id === 'marketing' && moduleActive && (
+                              <div className="ml-4 space-y-0.5 border-l border-primary/15 pl-2">
+                                {marketingTrustViews.map(view => {
+                                  const ViewIcon = view.icon;
+                                  const viewActive = marketingTrustView === view.id;
+                                  return (
+                                    <button
+                                      key={view.id}
+                                      type="button"
+                                      onClick={() => {
+                                        handleMarketingTrustViewChange(view.id);
+                                        setIsMobileMenuOpen(false);
+                                      }}
+                                      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[11px] font-black transition ${
+                                        viewActive
+                                          ? 'bg-primary text-white shadow-sm shadow-primary/15'
+                                          : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+                                      }`}
+                                      id={`nav-marketing-${view.id}-btn`}
+                                    >
+                                      <ViewIcon className="h-3.5 w-3.5 shrink-0" />
+                                      <span className="truncate">{view.label}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
                         );
                       })}
                     </div>
@@ -840,9 +937,11 @@ export default function App() {
             {activeTab === 'practice' && (
               <PracticeCloud 
                 module={trustedCloudModule}
+                marketingView={marketingTrustView}
                 cards={practiceCards} 
                 knowledgeAssets={knowledgeAssets}
                 onAddCard={handleAddPracticeCard} 
+                onMarketingViewChange={handleMarketingTrustViewChange}
               />
             )}
           </Suspense>
