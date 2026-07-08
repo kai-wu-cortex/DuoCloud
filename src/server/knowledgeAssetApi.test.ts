@@ -217,11 +217,10 @@ class FakeCollection<T extends { _id?: unknown }> {
   }
 
   find(filter: Filter<T>) {
-    const items = this.documents
+    let items = this.documents
       .filter(document => matchesFilter(document as Record<string, unknown>, filter as Record<string, unknown>))
       .map(document => clone(document));
-
-    return {
+    const cursor = {
       sort: (sortSpec: Record<string, 1 | -1>) => {
         const entries = Object.entries(sortSpec);
         items.sort((left, right) => {
@@ -239,12 +238,30 @@ class FakeCollection<T extends { _id?: unknown }> {
           }
           return 0;
         });
-        return {
-          toArray: async () => items.map(item => clone(item)),
-        };
+        return cursor;
+      },
+      project: (projection: Record<string, 0 | 1>) => {
+        items = items.map(item => {
+          const next = { ...item } as Record<string, unknown>;
+          for (const [field, mode] of Object.entries(projection)) {
+            if (mode === 0) delete next[field];
+          }
+          return next as T;
+        });
+        return cursor;
+      },
+      skip: (count: number) => {
+        items = items.slice(count);
+        return cursor;
+      },
+      limit: (count: number) => {
+        items = items.slice(0, count);
+        return cursor;
       },
       toArray: async () => items.map(item => clone(item)),
     };
+
+    return cursor;
   }
 
   async replaceOne(filter: Filter<T>, replacement: T, options?: { upsert?: boolean }) {
@@ -499,8 +516,8 @@ test('soft-deleted assets are filtered from list and export responses', async ()
   });
   const listRes = createMockResponse();
   await handleKnowledgeAssetsRequest(listReq, listRes.res);
-  const listItems = getSuccessData<KnowledgeAssetDocument[]>(listRes.state.body);
-  assert.deepEqual(listItems.map(item => item._id), ['GOV-001']);
+  const listItems = getSuccessData<KnowledgeAsset[]>(listRes.state.body);
+  assert.deepEqual(listItems.map(item => item.id), ['GOV-001']);
 
   const exportReq = createRequest({
     method: 'GET',

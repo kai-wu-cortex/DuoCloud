@@ -218,9 +218,32 @@ function sanitizeKnowledgeAttachmentPathSegment(value: string | undefined, fallb
     .slice(0, 80) || fallback;
 }
 
-export async function listKnowledgeAssets(): Promise<KnowledgeAsset[]> {
-  const payload = await requestKnowledgeApi<unknown>('/api/knowledge-assets');
+export interface KnowledgeAssetListOptions {
+  summary?: boolean;
+  limit?: number;
+  offset?: number;
+  category?: string;
+  query?: string;
+}
+
+function buildKnowledgeAssetListPath(options: KnowledgeAssetListOptions = {}): string {
+  const params = new URLSearchParams();
+  params.set('summary', options.summary === false ? '0' : '1');
+  if (typeof options.limit === 'number') params.set('limit', String(options.limit));
+  if (typeof options.offset === 'number') params.set('offset', String(options.offset));
+  if (options.category) params.set('category', options.category);
+  if (options.query) params.set('q', options.query);
+  return `/api/knowledge-assets?${params.toString()}`;
+}
+
+export async function listKnowledgeAssets(options: KnowledgeAssetListOptions = {}): Promise<KnowledgeAsset[]> {
+  const payload = await requestKnowledgeApi<unknown>(buildKnowledgeAssetListPath(options));
   return parseKnowledgeApiListResponse(payload);
+}
+
+export async function getRemoteKnowledgeAsset(id: string): Promise<KnowledgeAsset> {
+  const payload = await requestKnowledgeApi<unknown>(`/api/knowledge-assets/${encodeURIComponent(id)}`);
+  return parseKnowledgeApiAssetResponse(payload);
 }
 
 export async function createRemoteKnowledgeAsset(asset: Omit<KnowledgeAsset, 'id' | 'lastUpdated'>): Promise<KnowledgeAsset> {

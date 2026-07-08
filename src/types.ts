@@ -24,6 +24,7 @@ export interface KnowledgeAssetBase {
   author: string;
   content: string;
   originalMarkdown?: string;
+  summaryOnly?: boolean;
   access?: 'public' | 'private';
   ownerUid?: string;
   ownerUsername?: string;

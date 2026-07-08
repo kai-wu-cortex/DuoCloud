@@ -54,7 +54,7 @@ test('listKnowledgeAssets requests same-origin cookies', async () => {
   try {
     const result = await listKnowledgeAssets();
     assert.deepEqual(result, []);
-    assert.equal(calls[0]?.input, '/api/knowledge-assets');
+    assert.equal(calls[0]?.input, '/api/knowledge-assets?summary=1');
     assert.equal(calls[0]?.init?.credentials, 'same-origin');
   } finally {
     globalThis.fetch = originalFetch;

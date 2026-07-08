@@ -77,7 +77,10 @@ interface KnowledgeAssetImportJobDocument extends Document {
 }
 
 type FindCursor<T> = {
-  sort(sortSpec: Record<string, 1 | -1>): { toArray(): Promise<T[]> };
+  sort(sortSpec: Record<string, 1 | -1>): FindCursor<T>;
+  project?(projection: Record<string, 0 | 1>): FindCursor<T>;
+  skip?(count: number): FindCursor<T>;
+  limit?(count: number): FindCursor<T>;
   toArray(): Promise<T[]>;
 };
 
@@ -255,6 +258,19 @@ function getQueryString(value: unknown): string | undefined {
   return undefined;
 }
 
+function getQueryNumber(value: unknown, fallback: number, options: { min: number; max: number }): number {
+  const rawValue = getQueryString(value);
+  const parsed = rawValue ? Number.parseInt(rawValue, 10) : fallback;
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(options.max, Math.max(options.min, parsed));
+}
+
+function getQueryBoolean(value: unknown, fallback: boolean): boolean {
+  const rawValue = getQueryString(value);
+  if (rawValue === undefined) return fallback;
+  return rawValue === '1' || rawValue === 'true' || rawValue === 'yes';
+}
+
 function getKnowledgeAssetIdFromRequest(req: Pick<Request, 'query'>): string {
   const rawId = getQueryString(req.query.id);
   const id = rawId ? normalizeKnowledgeAssetId(rawId) : '';
@@ -284,6 +300,49 @@ function stripKnowledgeAssetMetadata(document: KnowledgeAssetDocument): Knowledg
 function stripServerManagedKnowledgeAssetFields(asset: KnowledgeAsset): Omit<KnowledgeAsset, 'lastUpdated'> {
   const { lastUpdated: _ignoredLastUpdated, ...content } = asset;
   return content;
+}
+
+function buildSummaryContent(asset: KnowledgeAsset): string {
+  const excludedKeys = new Set([
+    'id',
+    'category',
+    'title',
+    'tags',
+    'lastUpdated',
+    'author',
+    'content',
+    'originalMarkdown',
+    'access',
+    'ownerUid',
+    'ownerUsername',
+    'sourcePath',
+    'directoryLevel1',
+    'directoryLevel2',
+    'directoryLevel3',
+    'localEditedAt',
+  ]);
+  const snippets = Object.entries(asset)
+    .filter(([key, value]) => (
+      !excludedKeys.has(key)
+      && typeof value === 'string'
+      && value.trim().length > 0
+      && !/^https?:\/\//i.test(value.trim())
+      && !/\.(png|jpe?g|webp|gif|svg|avif|pdf|docx?|xlsx?)(\?.*)?$/i.test(value.trim())
+    ))
+    .map(([key, value]) => `${key}: ${String(value).replace(/\s+/g, ' ').trim()}`);
+
+  const sourceHint = asset.sourcePath ? `来源: ${asset.sourcePath}` : '';
+  return [sourceHint, ...snippets].filter(Boolean).join('  ').slice(0, 360);
+}
+
+function toKnowledgeAssetSummary(document: KnowledgeAssetDocument): KnowledgeAsset {
+  const asset = stripKnowledgeAssetMetadata(document);
+  const { originalMarkdown: _ignoredOriginalMarkdown, ...assetWithoutOriginalMarkdown } = asset;
+  return {
+    ...assetWithoutOriginalMarkdown,
+    content: buildSummaryContent(asset),
+    summaryOnly: true,
+  } as KnowledgeAsset;
 }
 
 function isSameKnowledgeAssetContent(
@@ -698,6 +757,9 @@ export async function handleKnowledgeAssetsRequest(
     const filter = buildActiveFilter();
     const category = getQueryString(req.query.category);
     const search = getQueryString(req.query.q)?.trim();
+    const summary = getQueryBoolean(req.query.summary, true);
+    const limit = getQueryNumber(req.query.limit, 2000, { min: 1, max: 5000 });
+    const offset = getQueryNumber(req.query.offset, 0, { min: 0, max: 500000 });
 
     if (category && isKnowledgeCategory(category)) {
       filter.category = category;
@@ -712,8 +774,30 @@ export async function handleKnowledgeAssetsRequest(
       ];
     }
 
-    const items = await collection.find(filter).sort({ serverUpdatedAt: -1, _id: 1 }).toArray();
-    sendKnowledgeJson(res, 200, { success: true, data: items });
+    let cursor = collection.find(filter).sort({ serverUpdatedAt: -1, _id: 1 });
+    if (summary && cursor.project) {
+      cursor = cursor.project({ content: 0, originalMarkdown: 0 });
+    }
+    if (offset > 0 && cursor.skip) {
+      cursor = cursor.skip(offset);
+    }
+    if (cursor.limit) {
+      cursor = cursor.limit(limit);
+    }
+
+    const documents = await cursor.toArray();
+    const items = summary ? documents.map(toKnowledgeAssetSummary) : documents;
+    sendKnowledgeJson(res, 200, {
+      success: true,
+      data: items,
+      meta: {
+        summary,
+        limit,
+        offset,
+        returned: items.length,
+        hasMore: items.length === limit,
+      },
+    });
     return;
   }
 

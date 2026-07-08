@@ -77,21 +77,9 @@ const DIFY_CHATBOT_TOKEN = 'Pqyg8S5HUiWNYD72';
 const DIFY_EMBED_SRC = 'https://udify.app/embed.min.js';
 
 const lightweightKnowledgeAssets = curateKnowledgeAssets(initialKnowledgeAssets);
-let fullKnowledgeFallbackPromise: Promise<KnowledgeAsset[]> | null = null;
 
 function loadLocalKnowledgeFallback() {
   return curateKnowledgeAssets(loadKnowledgeAssets(lightweightKnowledgeAssets));
-}
-
-async function loadFullLocalKnowledgeFallback() {
-  if (!fullKnowledgeFallbackPromise) {
-    fullKnowledgeFallbackPromise = import('./data/obsidianKnowledgeAssets').then(({ obsidianKnowledgeAssets }) => {
-      const seededKnowledgeAssets = curateKnowledgeAssets([...obsidianKnowledgeAssets, ...initialKnowledgeAssets]);
-      return curateKnowledgeAssets(loadKnowledgeAssets(seededKnowledgeAssets));
-    });
-  }
-
-  return fullKnowledgeFallbackPromise;
 }
 
 type DifyWindow = Window & {
@@ -417,7 +405,7 @@ export default function App() {
     setKnowledgeCloudStatus('loading');
 
     try {
-      const remoteAssets = curateKnowledgeAssets(await listKnowledgeAssets());
+      const remoteAssets = curateKnowledgeAssets(await listKnowledgeAssets({ summary: true, limit: 5000 }));
       setKnowledgeAssets(remoteAssets);
       saveKnowledgeAssets(remoteAssets);
       setKnowledgeCloudStatus('online');
@@ -433,11 +421,9 @@ export default function App() {
       }
 
       const currentAssets = knowledgeAssetsRef.current;
-      const fallbackAssets = currentAssets.length > 0 ? currentAssets : await loadFullLocalKnowledgeFallback();
-      setKnowledgeAssets(currentAssets => (currentAssets.length > 0 ? currentAssets : fallbackAssets));
-      if (currentAssets.length === 0) saveKnowledgeAssets(fallbackAssets);
+      setKnowledgeAssets(currentAssets);
       setKnowledgeCloudStatus('offline');
-      return fallbackAssets;
+      return currentAssets;
     }
   }, []);
 

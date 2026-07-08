@@ -24,7 +24,7 @@ import {
 import { getKnowledgePreviewText } from '../lib/knowledgePreview';
 import { DEFAULT_MARKDOWN_EDITOR_MODE, getMarkdownEditorModeValue, type MarkdownEditorMode } from '../lib/markdownEditorModes';
 import type { AuthUser } from '../lib/authApi';
-import { uploadKnowledgeAttachment, type KnowledgeApiBulkResult, type KnowledgeAttachmentUploadResult } from '../lib/knowledgeApi';
+import { getRemoteKnowledgeAsset, uploadKnowledgeAttachment, type KnowledgeApiBulkResult, type KnowledgeAttachmentUploadResult } from '../lib/knowledgeApi';
 
 interface KnowledgeCloudProps {
   assets: KnowledgeAsset[];
@@ -759,6 +759,7 @@ export default function KnowledgeCloud({
   const [activeDirectoryPath, setActiveDirectoryPath] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedAsset, setSelectedAsset] = useState<KnowledgeAsset | null>(null);
+  const [loadingDetailAssetId, setLoadingDetailAssetId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<KnowledgeDetailTab>('info');
   const [editingAsset, setEditingAsset] = useState<KnowledgeAsset | null>(null);
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
@@ -832,23 +833,41 @@ export default function KnowledgeCloud({
     setIsModalOpen(true);
   };
 
-  const openEditAssetDrawer = (asset: KnowledgeAsset) => {
+  const ensureFullKnowledgeAsset = async (asset: KnowledgeAsset): Promise<KnowledgeAsset> => {
+    if (!asset.summaryOnly) return asset;
+    setLoadingDetailAssetId(asset.id);
+    try {
+      return await getRemoteKnowledgeAsset(asset.id);
+    } finally {
+      setLoadingDetailAssetId(currentId => currentId === asset.id ? null : currentId);
+    }
+  };
+
+  const openEditAssetDrawer = async (asset: KnowledgeAsset) => {
     if (!canEdit) {
       showToast(isOffline ? '离线缓存模式下暂不能编辑知识卡片' : '当前账号没有编辑权限');
       return;
     }
-    const schema = getKnowledgeFieldSchema(asset.category);
-    const nextFields = createInitialKnowledgeFields(asset.category);
+    let fullAsset = asset;
+    try {
+      fullAsset = await ensureFullKnowledgeAsset(asset);
+    } catch (error) {
+      console.error('Failed to load knowledge asset detail', error);
+      showToast(error instanceof Error ? error.message : '知识卡片详情加载失败', 3600);
+      return;
+    }
+    const schema = getKnowledgeFieldSchema(fullAsset.category);
+    const nextFields = createInitialKnowledgeFields(fullAsset.category);
     for (const field of schema.fields) {
-      nextFields[field.name] = String((asset as any)[field.name] ?? '');
+      nextFields[field.name] = String((fullAsset as any)[field.name] ?? '');
     }
 
-    setEditingAsset(asset);
-    setNewTitle(asset.title);
-    setNewCategory(asset.category);
-    setNewContent(asset.content);
-    setNewAuthor(asset.author);
-    setNewTagsString(asset.tags.join('，'));
+    setEditingAsset(fullAsset);
+    setNewTitle(fullAsset.title);
+    setNewCategory(fullAsset.category);
+    setNewContent(fullAsset.content);
+    setNewAuthor(fullAsset.author);
+    setNewTagsString(fullAsset.tags.join('，'));
     setDynamicFields(nextFields);
     setIsModalOpen(true);
   };
@@ -1475,11 +1494,19 @@ export default function KnowledgeCloud({
     );
   };
 
-  const openAssetDetail = (asset: KnowledgeAsset) => {
+  const openAssetDetail = async (asset: KnowledgeAsset) => {
     const nextState = getKnowledgeCardClickState(asset);
     setActiveCardId(nextState.activeCardId);
     setSelectedAsset(nextState.selectedAsset);
     setDetailTab('info');
+    if (!nextState.selectedAsset || !asset.summaryOnly) return;
+    try {
+      const fullAsset = await ensureFullKnowledgeAsset(asset);
+      setSelectedAsset(current => current?.id === asset.id ? fullAsset : current);
+    } catch (error) {
+      console.error('Failed to load knowledge asset detail', error);
+      showToast(error instanceof Error ? error.message : '知识卡片详情加载失败', 3600);
+    }
   };
 
   const categoryTitle = activeCategory === 'all' 
@@ -2559,6 +2586,9 @@ export default function KnowledgeCloud({
                   <div className="flex items-center gap-4 mt-3 text-[10px] text-on-surface-variant/85 font-mono font-bold">
                     <span className="flex items-center gap-1"><User className="w-3.5 h-3.5 text-primary" /> 负责人: {selectedAsset.author}</span>
                     <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-primary" /> 更新时间: {selectedAsset.lastUpdated}</span>
+                    {loadingDetailAssetId === selectedAsset.id && (
+                      <span className="text-primary">正在加载完整正文...</span>
+                    )}
                   </div>
                 </div>
 
