@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   AlertTriangle,
@@ -107,6 +107,8 @@ type EvidenceEditForm = Omit<EvidenceDraftForm, 'type' | 'status' | 'trustLevel'
 };
 
 const LOCAL_EVIDENCE_STORAGE_KEY = 'pinte-marketing-trust-local-evidence';
+const LOCAL_EVIDENCE_OVERRIDES_STORAGE_KEY = 'pinte-marketing-trust-evidence-overrides';
+const LOCAL_PRIMARY_COLUMN_SETTINGS_KEY = 'pinte-marketing-trust-primary-column-settings';
 
 export const MARKETING_TRUST_NAV_ITEMS: Array<{ id: MarketingView; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: 'overview', label: '总览', icon: Cloud },
@@ -462,26 +464,72 @@ const CORE_PRIMARY_TABLE_COLUMNS: PrimaryColumnDef[] = [
   },
 ];
 
-const EXTENDED_PRIMARY_TABLE_COLUMNS: PrimaryColumnDef[] = MAIN_TABLE_EXTENSION_SECTIONS.flatMap(section =>
+const buildExtendedPrimaryTableColumns = (previewRegistry: Record<string, AttachmentPreview> = {}): PrimaryColumnDef[] => MAIN_TABLE_EXTENSION_SECTIONS.flatMap(section =>
   section.fields.map(field => ({
     key: `extended:${field.key}`,
     label: field.label,
     group: section.title,
-    defaultWidth: field.kind === 'textarea' ? 260 : field.kind === 'boolean' ? 120 : 180,
-    render: record => record.extendedFields?.[field.key] || '—',
+    defaultWidth: isAttachmentField(field) ? 220 : field.kind === 'textarea' ? 260 : field.kind === 'boolean' ? 120 : 180,
+    render: record => {
+      const value = record.extendedFields?.[field.key] || '';
+      if (!value) return '—';
+      if (isAttachmentField(field)) {
+        return <AttachmentPreviewStrip value={value} previewRegistry={previewRegistry} compact />;
+      }
+      return value;
+    },
   }))
 );
 
-const PRIMARY_TABLE_COLUMNS: PrimaryColumnDef[] = [
+const buildPrimaryTableColumns = (previewRegistry: Record<string, AttachmentPreview> = {}): PrimaryColumnDef[] => [
   ...CORE_PRIMARY_TABLE_COLUMNS,
-  ...EXTENDED_PRIMARY_TABLE_COLUMNS,
+  ...buildExtendedPrimaryTableColumns(previewRegistry),
 ];
+
+const PRIMARY_TABLE_COLUMNS: PrimaryColumnDef[] = buildPrimaryTableColumns();
 
 const DEFAULT_PRIMARY_COLUMN_SETTINGS: PrimaryColumnSetting[] = PRIMARY_TABLE_COLUMNS.map(column => ({
   key: column.key,
   visible: CORE_PRIMARY_TABLE_COLUMNS.some(coreColumn => coreColumn.key === column.key),
   width: column.defaultWidth,
 }));
+
+function normalizePrimaryColumnSettings(value: unknown): PrimaryColumnSetting[] {
+  const saved = Array.isArray(value) ? value : [];
+  const defaultsByKey = new Map(DEFAULT_PRIMARY_COLUMN_SETTINGS.map(setting => [setting.key, setting]));
+  const usedKeys = new Set<PrimaryColumnKey>();
+  const normalized: PrimaryColumnSetting[] = [];
+
+  saved.forEach(item => {
+    if (!item || typeof item !== 'object') return;
+    const candidate = item as Partial<PrimaryColumnSetting>;
+    if (typeof candidate.key !== 'string' || usedKeys.has(candidate.key)) return;
+    const defaultSetting = defaultsByKey.get(candidate.key);
+    if (!defaultSetting) return;
+    usedKeys.add(candidate.key);
+    normalized.push({
+      key: candidate.key,
+      visible: typeof candidate.visible === 'boolean' ? candidate.visible : defaultSetting.visible,
+      width: clampColumnWidth(candidate.key, typeof candidate.width === 'number' ? candidate.width : defaultSetting.width),
+    });
+  });
+
+  DEFAULT_PRIMARY_COLUMN_SETTINGS.forEach(defaultSetting => {
+    if (!usedKeys.has(defaultSetting.key)) normalized.push(defaultSetting);
+  });
+
+  return normalized;
+}
+
+function readPrimaryColumnSettings(): PrimaryColumnSetting[] {
+  if (typeof window === 'undefined') return DEFAULT_PRIMARY_COLUMN_SETTINGS;
+  try {
+    if (!('localStorage' in window) || !window.localStorage) return DEFAULT_PRIMARY_COLUMN_SETTINGS;
+    return normalizePrimaryColumnSettings(JSON.parse(window.localStorage.getItem(LOCAL_PRIMARY_COLUMN_SETTINGS_KEY) || '[]'));
+  } catch {
+    return DEFAULT_PRIMARY_COLUMN_SETTINGS;
+  }
+}
 
 function primaryColumnWidthBounds(key: PrimaryColumnKey) {
   if (key.startsWith('extended:')) return { min: 120, max: 420 };
@@ -511,6 +559,124 @@ function formatFileSize(size: number) {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+type AttachmentPreviewKind = 'image' | 'video' | 'pdf' | 'file';
+
+interface AttachmentPreview {
+  src?: string;
+  kind: AttachmentPreviewKind;
+  label: string;
+  meta?: string;
+  objectUrl?: boolean;
+}
+
+interface AttachmentPreviewRegistration {
+  items: string[];
+  previews: Record<string, AttachmentPreview>;
+}
+
+function stripAttachmentMeta(value: string) {
+  return value.trim().replace(/\s+\([^)]*\)\s*$/, '');
+}
+
+function getAttachmentKind(value: string, mimeType = ''): AttachmentPreviewKind {
+  const lowerValue = stripAttachmentMeta(value).toLowerCase();
+  const lowerMime = mimeType.toLowerCase();
+  if (lowerMime.startsWith('image/') || /\.(png|jpe?g|webp|gif|svg|avif|bmp)(\?.*)?$/i.test(lowerValue)) return 'image';
+  if (lowerMime.startsWith('video/') || /\.(mp4|webm|mov|m4v|avi|mkv)(\?.*)?$/i.test(lowerValue)) return 'video';
+  if (lowerMime === 'application/pdf' || /\.pdf(\?.*)?$/i.test(lowerValue)) return 'pdf';
+  return 'file';
+}
+
+function getAttachmentLabel(value: string) {
+  const cleanValue = stripAttachmentMeta(value).split(/[?#]/)[0].trim();
+  try {
+    const url = new URL(cleanValue);
+    return decodeURIComponent(url.pathname.split('/').filter(Boolean).at(-1) || url.hostname);
+  } catch {
+    return cleanValue.split(/[\\/]/).filter(Boolean).at(-1) || cleanValue;
+  }
+}
+
+function isOpenableAttachment(value: string) {
+  return /^(https?:\/\/|blob:|data:|\/)/i.test(stripAttachmentMeta(value));
+}
+
+function buildExternalAttachmentPreview(item: string): AttachmentPreview {
+  const src = stripAttachmentMeta(item);
+  const openable = isOpenableAttachment(src);
+  return {
+    src: openable ? src : undefined,
+    kind: getAttachmentKind(src),
+    label: getAttachmentLabel(src),
+    meta: openable ? '外部链接' : '本地文件名',
+  };
+}
+
+function buildFilePreviewRegistration(files: File[], trackObjectUrl?: (url: string) => void): AttachmentPreviewRegistration {
+  const previews: Record<string, AttachmentPreview> = {};
+  const items = files.map(file => {
+    const token = `${file.name} (${formatFileSize(file.size)})`;
+    const url = URL.createObjectURL(file);
+    trackObjectUrl?.(url);
+    previews[token] = {
+      src: url,
+      kind: getAttachmentKind(file.name, file.type),
+      label: file.name,
+      meta: `${file.type || '附件'} · ${formatFileSize(file.size)}`,
+      objectUrl: true,
+    };
+    return token;
+  });
+  return { items, previews };
+}
+
+function resolveAttachmentPreview(item: string, previewRegistry: Record<string, AttachmentPreview> = {}) {
+  return previewRegistry[item] || previewRegistry[stripAttachmentMeta(item)] || buildExternalAttachmentPreview(item);
+}
+
+function AttachmentPreviewStrip({
+  value,
+  previewRegistry = {},
+  compact = false,
+}: {
+  value: string;
+  previewRegistry?: Record<string, AttachmentPreview>;
+  compact?: boolean;
+}) {
+  const items = splitAttachmentValue(value);
+  if (!items.length) return <span>—</span>;
+  const previews = items.map(item => resolveAttachmentPreview(item, previewRegistry));
+  const first = previews[0];
+  const media = (
+    <div className={`${compact ? 'h-14 w-20' : 'h-24 w-36'} overflow-hidden rounded-lg border border-slate-200 bg-slate-100`}>
+      {first.kind === 'image' && first.src ? (
+        <img src={first.src} alt={first.label} className="h-full w-full object-cover" />
+      ) : first.kind === 'video' && first.src ? (
+        <video src={first.src} className="h-full w-full bg-black object-cover" muted playsInline />
+      ) : first.kind === 'pdf' && first.src ? (
+        <iframe src={first.src} title={first.label} className="h-full w-full bg-white" />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-blue-600">
+          {first.kind === 'video' ? <Video className="h-5 w-5" /> : first.kind === 'image' ? <ImageIcon className="h-5 w-5" /> : <FileText className="h-5 w-5" />}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className={`flex min-w-0 items-center ${compact ? 'gap-2' : 'gap-3'}`}>
+      {media}
+      <div className="min-w-0">
+        <p className="truncate font-black text-[#071a41]">{first.label}</p>
+        <p className="truncate text-[11px] font-bold text-slate-400">
+          {first.kind === 'image' ? '图片预览' : first.kind === 'video' ? '视频预览' : first.kind === 'pdf' ? 'PDF 预览' : '附件预览'}
+          {items.length > 1 ? ` · +${items.length - 1}` : ''}
+        </p>
+      </div>
+    </div>
+  );
 }
 
 const SALES_INTENT_KEYWORDS = [
@@ -803,6 +969,18 @@ function readLocalEvidenceAssets(): EvidenceAsset[] {
   }
 }
 
+function readEvidenceOverrides(): Record<string, Partial<EvidenceAsset>> {
+  if (typeof window === 'undefined') return {};
+  try {
+    if (!('localStorage' in window) || !window.localStorage) return {};
+    const parsed = JSON.parse(window.localStorage.getItem(LOCAL_EVIDENCE_OVERRIDES_STORAGE_KEY) || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return parsed as Record<string, Partial<EvidenceAsset>>;
+  } catch {
+    return {};
+  }
+}
+
 function formatDate(date = new Date()) {
   return date.toISOString().slice(0, 10);
 }
@@ -1058,21 +1236,51 @@ function AttachmentUploadField({
   field,
   value,
   onChange,
+  previewRegistry = {},
+  onRegisterFiles,
   batchMode = false,
 }: {
   field: DraftFieldSpec;
   value: string;
   onChange: (value: string) => void;
+  previewRegistry?: Record<string, AttachmentPreview>;
+  onRegisterFiles?: (files: File[]) => AttachmentPreviewRegistration;
   batchMode?: boolean;
 }) {
   const inputId = `upload-${field.key}`;
   const items = splitAttachmentValue(value);
+  const objectUrlsRef = useRef<string[]>([]);
+  const [uploadedPreviews, setUploadedPreviews] = useState<Record<string, AttachmentPreview>>({});
+
+  useEffect(() => {
+    return () => {
+      objectUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
+      objectUrlsRef.current = [];
+    };
+  }, []);
+
   const appendFiles = (files: FileList | File[]) => {
-    const nextItems = Array.from(files).map(file => `${file.name} (${formatFileSize(file.size)})`);
+    const fileList = Array.from(files);
+    const registration = onRegisterFiles
+      ? onRegisterFiles(fileList)
+      : buildFilePreviewRegistration(fileList, url => objectUrlsRef.current.push(url));
+    const nextItems = registration.items;
+    const nextPreviews = registration.previews;
     if (!nextItems.length) return;
+    setUploadedPreviews(prev => ({ ...prev, ...nextPreviews }));
     onChange(Array.from(new Set([...items, ...nextItems])).join('\n'));
   };
   const removeItem = (item: string) => {
+    const preview = uploadedPreviews[item] || previewRegistry[item];
+    if (preview?.objectUrl && preview.src) {
+      URL.revokeObjectURL(preview.src);
+      objectUrlsRef.current = objectUrlsRef.current.filter(url => url !== preview.src);
+      setUploadedPreviews(prev => {
+        const next = { ...prev };
+        delete next[item];
+        return next;
+      });
+    }
     onChange(items.filter(current => current !== item).join('\n'));
   };
 
@@ -1113,20 +1321,54 @@ function AttachmentUploadField({
         </p>
       </label>
       {items.length > 0 && (
-        <div className="flex flex-wrap gap-2 rounded-xl border border-slate-100 bg-white px-3 py-2">
-          {items.map(item => (
-            <span key={item} className="inline-flex max-w-full items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-600">
-              <span className="max-w-64 truncate">{item}</span>
-              <button
-                type="button"
-                onClick={() => removeItem(item)}
-                className="rounded-full text-slate-400 hover:text-rose-500"
-                aria-label={`移除${item}`}
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </span>
-          ))}
+        <div className="grid gap-3 rounded-xl border border-slate-100 bg-white p-3 sm:grid-cols-2">
+          {items.map(item => {
+            const preview = uploadedPreviews[item] || resolveAttachmentPreview(item, previewRegistry);
+            return (
+              <div key={item} className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 shadow-sm">
+                <div className="relative aspect-video bg-slate-100">
+                  {preview.kind === 'image' && preview.src ? (
+                    <img src={preview.src} alt={preview.label} className="h-full w-full object-cover" />
+                  ) : preview.kind === 'video' && preview.src ? (
+                    <video src={preview.src} controls className="h-full w-full bg-black object-contain" />
+                  ) : preview.kind === 'pdf' && preview.src ? (
+                    <iframe src={preview.src} title={preview.label} className="h-full w-full bg-white" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-blue-600 shadow-sm ring-1 ring-blue-100">
+                        {preview.kind === 'video' ? <Video className="h-6 w-6" /> : preview.kind === 'image' ? <ImageIcon className="h-6 w-6" /> : <FileText className="h-6 w-6" />}
+                      </div>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => removeItem(item)}
+                    className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-500 shadow-sm backdrop-blur hover:text-rose-500"
+                    aria-label={`移除${preview.label}`}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="flex items-center justify-between gap-2 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-black text-[#071a41]">{preview.label}</p>
+                    <p className="truncate text-[11px] font-bold text-slate-400">{preview.meta || item}</p>
+                  </div>
+                  {preview.src && (
+                    <a
+                      href={preview.src}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-blue-600 hover:border-blue-300 hover:bg-blue-50"
+                      title="打开预览"
+                    >
+                      <Eye className="h-4 w-4" />
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
       <textarea
@@ -1311,14 +1553,14 @@ export default function MarketingTrustWorkspace({
   onActiveViewChange,
 }: MarketingTrustWorkspaceProps) {
   const [localEvidenceAssets, setLocalEvidenceAssets] = useState<EvidenceAsset[]>(readLocalEvidenceAssets);
-  const [evidenceOverrides, setEvidenceOverrides] = useState<Record<string, Partial<EvidenceAsset>>>({});
+  const [evidenceOverrides, setEvidenceOverrides] = useState<Record<string, Partial<EvidenceAsset>>>(readEvidenceOverrides);
   const [isCreatePanelOpen, setIsCreatePanelOpen] = useState(false);
   const [isEvidenceDetailOpen, setIsEvidenceDetailOpen] = useState(false);
   const [isEvidenceEditOpen, setIsEvidenceEditOpen] = useState(false);
   const [isPrimaryInspectorOpen, setIsPrimaryInspectorOpen] = useState(false);
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false);
   const [draggedColumnKey, setDraggedColumnKey] = useState<PrimaryColumnKey | null>(null);
-  const [primaryColumnSettings, setPrimaryColumnSettings] = useState<PrimaryColumnSetting[]>(DEFAULT_PRIMARY_COLUMN_SETTINGS);
+  const [primaryColumnSettings, setPrimaryColumnSettings] = useState<PrimaryColumnSetting[]>(readPrimaryColumnSettings);
   const [fieldViewQuery, setFieldViewQuery] = useState('');
   const [draftForm, setDraftForm] = useState<EvidenceDraftForm>(DEFAULT_DRAFT_FORM);
   const [createOriginView, setCreateOriginView] = useState<MarketingView>('primary');
@@ -1338,6 +1580,8 @@ export default function MarketingTrustWorkspace({
   const [selectedEvidenceIds, setSelectedEvidenceIds] = useState<string[]>([]);
   const [editingEvidenceIds, setEditingEvidenceIds] = useState<string[]>([]);
   const [editForm, setEditForm] = useState<EvidenceEditForm>(EMPTY_EVIDENCE_EDIT_FORM);
+  const attachmentObjectUrlsRef = useRef<string[]>([]);
+  const [attachmentPreviewRegistry, setAttachmentPreviewRegistry] = useState<Record<string, AttachmentPreview>>({});
   const evidenceRecords = useMemo(() => {
     const cardRecords = cards.map(buildEvidenceFromCard);
     return [...localEvidenceAssets, ...MARKETING_TRUST_EVIDENCE_ASSETS, ...cardRecords].map(record => ({
@@ -1347,14 +1591,15 @@ export default function MarketingTrustWorkspace({
   }, [cards, evidenceOverrides, localEvidenceAssets]);
   const localEvidenceIds = useMemo(() => new Set(localEvidenceAssets.map(record => record.id)), [localEvidenceAssets]);
   const primaryColumns = useMemo(() => {
-    const definitions = new Map(PRIMARY_TABLE_COLUMNS.map(column => [column.key, column]));
+    const allColumns = buildPrimaryTableColumns(attachmentPreviewRegistry);
+    const definitions = new Map(allColumns.map(column => [column.key, column]));
     return primaryColumnSettings
       .filter(setting => setting.visible)
       .map(setting => {
-        const definition = definitions.get(setting.key) || PRIMARY_TABLE_COLUMNS[0];
+        const definition = definitions.get(setting.key) || allColumns[0];
         return { ...definition, width: setting.width };
       });
-  }, [primaryColumnSettings]);
+  }, [attachmentPreviewRegistry, primaryColumnSettings]);
   const salesKeywords = useMemo(() => extractSalesKeywords(customerNeed, evidenceRecords), [customerNeed, evidenceRecords]);
   const salesRecommendations = useMemo(() => rankEvidenceForNeed(customerNeed, evidenceRecords).slice(0, 6), [customerNeed, evidenceRecords]);
   const customerReply = useMemo(() => buildCustomerReply(customerNeed, salesRecommendations), [customerNeed, salesRecommendations]);
@@ -1398,6 +1643,13 @@ export default function MarketingTrustWorkspace({
   }, [actionNotice]);
 
   useEffect(() => {
+    return () => {
+      attachmentObjectUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
+      attachmentObjectUrlsRef.current = [];
+    };
+  }, []);
+
+  useEffect(() => {
     if (typeof window === 'undefined' || !('localStorage' in window) || !window.localStorage) return;
     try {
       window.localStorage.setItem(LOCAL_EVIDENCE_STORAGE_KEY, JSON.stringify(localEvidenceAssets));
@@ -1405,6 +1657,24 @@ export default function MarketingTrustWorkspace({
       // Current-session edits still work when localStorage is unavailable.
     }
   }, [localEvidenceAssets]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('localStorage' in window) || !window.localStorage) return;
+    try {
+      window.localStorage.setItem(LOCAL_EVIDENCE_OVERRIDES_STORAGE_KEY, JSON.stringify(evidenceOverrides));
+    } catch {
+      // Current-session edits still work when localStorage is unavailable.
+    }
+  }, [evidenceOverrides]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('localStorage' in window) || !window.localStorage) return;
+    try {
+      window.localStorage.setItem(LOCAL_PRIMARY_COLUMN_SETTINGS_KEY, JSON.stringify(primaryColumnSettings));
+    } catch {
+      // Current-session field view changes still work when localStorage is unavailable.
+    }
+  }, [primaryColumnSettings]);
 
   useEffect(() => {
     setTypeFilter(VIEW_TYPE_FILTER[activeView] || '全部类型');
@@ -1421,6 +1691,14 @@ export default function MarketingTrustWorkspace({
   }, [activeView]);
 
   const notifyAction = (message: string) => setActionNotice(message);
+
+  const registerAttachmentFiles = (files: File[]) => {
+    const registration = buildFilePreviewRegistration(files, url => attachmentObjectUrlsRef.current.push(url));
+    if (Object.keys(registration.previews).length) {
+      setAttachmentPreviewRegistry(current => ({ ...current, ...registration.previews }));
+    }
+    return registration;
+  };
 
   const updateDraft = <K extends keyof EvidenceDraftForm>(field: K, value: EvidenceDraftForm[K]) => {
     setDraftForm(current => ({ ...current, [field]: value }));
@@ -2434,7 +2712,7 @@ export default function MarketingTrustWorkspace({
               <table className="min-w-[780px] w-full text-left text-xs">
                 <thead className="bg-slate-50 text-[11px] font-black text-slate-500">
                   <tr>
-                    {['编号', '对比类型', '场景', '底材/膜', '关键结论', '可信等级', '可公开', '操作'].map(head => <th key={head} className="px-3 py-2">{head}</th>)}
+                    {['编号', '对比类型', '主图', '细节图', '测试图', '关键结论', '可信等级', '操作'].map(head => <th key={head} className="px-3 py-2">{head}</th>)}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -2449,11 +2727,23 @@ export default function MarketingTrustWorkspace({
                     <tr key={item.id} onClick={() => setSelectedId(item.id)} className="cursor-pointer hover:bg-blue-50/50">
                       <td className="px-3 py-2 font-black text-[#071a41]">{item.id}</td>
                       <td className="px-3 py-2 font-bold text-slate-600">{activeComparisonType}</td>
-                      <td className="px-3 py-2 font-bold text-slate-600">{item.scene}</td>
-                      <td className="px-3 py-2 font-bold text-slate-600">{item.substrate}<br /><span className="text-slate-400">{item.foilModel}</span></td>
+                      <td className="px-3 py-2 font-bold text-slate-600">
+                        {item.extendedFields?.hero_image ? (
+                          <AttachmentPreviewStrip value={item.extendedFields.hero_image} previewRegistry={attachmentPreviewRegistry} compact />
+                        ) : '—'}
+                      </td>
+                      <td className="px-3 py-2 font-bold text-slate-600">
+                        {item.extendedFields?.detail_images ? (
+                          <AttachmentPreviewStrip value={item.extendedFields.detail_images} previewRegistry={attachmentPreviewRegistry} compact />
+                        ) : '—'}
+                      </td>
+                      <td className="px-3 py-2 font-bold text-slate-600">
+                        {item.extendedFields?.test_images ? (
+                          <AttachmentPreviewStrip value={item.extendedFields.test_images} previewRegistry={attachmentPreviewRegistry} compact />
+                        ) : '—'}
+                      </td>
                       <td className="max-w-[220px] px-3 py-2 font-bold text-slate-600">{item.riskBoundary}</td>
                       <td className="px-3 py-2"><span className={`rounded-full border px-2 py-1 font-black ${toneForTrust(item.trustLevel)}`}>{item.trustLevel}</span></td>
-                      <td className="px-3 py-2 font-black text-emerald-600">{item.visibility === '仅内部' ? '内部' : '公开'}</td>
                       <td className="px-3 py-2 text-blue-600"><Eye className="inline h-4 w-4" /> <Pencil className="inline h-4 w-4" /></td>
                     </tr>
                   ))}
@@ -3227,7 +3517,13 @@ export default function MarketingTrustWorkspace({
                             {section.fields.map(field => (
                               <div key={field.key} className="rounded-lg bg-white px-3 py-2 shadow-sm">
                                 <p className="text-[11px] font-black text-slate-400">{field.label}</p>
-                                <p className="mt-1 text-sm font-black leading-relaxed text-[#071a41]">{field.value}</p>
+                                <div className="mt-1 text-sm font-black leading-relaxed text-[#071a41]">
+                                  {isAttachmentField(field) ? (
+                                    <AttachmentPreviewStrip value={field.value} previewRegistry={attachmentPreviewRegistry} />
+                                  ) : (
+                                    field.value
+                                  )}
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -3524,6 +3820,8 @@ export default function MarketingTrustWorkspace({
                                     field={field}
                                     value={value}
                                     onChange={(nextValue) => updateExtendedEditField(field.key, nextValue)}
+                                    previewRegistry={attachmentPreviewRegistry}
+                                    onRegisterFiles={registerAttachmentFiles}
                                     batchMode={isBatch}
                                   />
                                 </div>
@@ -3631,6 +3929,8 @@ export default function MarketingTrustWorkspace({
               field={field}
               value={value}
               onChange={(nextValue) => updateExtendedDraftField(field.key, nextValue)}
+              previewRegistry={attachmentPreviewRegistry}
+              onRegisterFiles={registerAttachmentFiles}
             />
           </div>
         );

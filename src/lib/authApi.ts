@@ -53,14 +53,25 @@ export async function signInToDuoCloud(username: string, password: string): Prom
     body: JSON.stringify({ username, password }),
   });
 
-  return parseAuthResponse(await response.json());
+  const payload = await readJsonPayload(response);
+  if (!payload) {
+    throw new Error('登录服务未返回有效 JSON，请确认本地 API 或 Vercel dev 服务已启动。');
+  }
+
+  return parseAuthResponse(payload);
 }
 
 export async function getDuoCloudSession(): Promise<AuthUser | null> {
   const response = await fetch('/api/auth/me', { credentials: 'same-origin' });
-  const payload = await response.json();
+  const payload = await readJsonPayload(response);
 
-  if (!payload.success || !payload.data) {
+  if (!payload) {
+    return null;
+  }
+
+  const value = payload as { success?: unknown; data?: unknown };
+
+  if (!value.success || !value.data) {
     return null;
   }
 

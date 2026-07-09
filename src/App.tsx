@@ -373,6 +373,8 @@ export default function App() {
   const urlTab = queryParams.get('tab');
   const urlModule = queryParams.get('module');
   const urlMarketingView = queryParams.get('view');
+  const viteEnv = (import.meta as unknown as { env?: { DEV?: boolean } }).env;
+  const isDevAuthRequested = Boolean(viteEnv?.DEV) && queryParams.get('devAuth') === '1';
   const initialTab = (urlTab === 'toolkit' || urlTab === 'knowledge' || urlTab === 'practice') ? urlTab : 'toolkit';
   const initialTrustedCloudModule: TrustedCloudModule = urlModule === 'marketing' || urlModule === 'delivery'
     ? urlModule
@@ -386,8 +388,12 @@ export default function App() {
   const [marketingTrustView, setMarketingTrustView] = useState<MarketingView>(initialMarketingTrustView);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [authStatus, setAuthStatus] = useState<'checking' | 'authenticated' | 'unauthenticated'>('checking');
-  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authStatus, setAuthStatus] = useState<'checking' | 'authenticated' | 'unauthenticated'>(
+    isDevAuthRequested ? 'authenticated' : 'checking',
+  );
+  const [authUser, setAuthUser] = useState<AuthUser | null>(
+    isDevAuthRequested ? { uid: 'local-dev', username: 'test', role: 'admin' } : null,
+  );
   const [authError, setAuthError] = useState<string | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [knowledgeCloudStatus, setKnowledgeCloudStatus] = useState<'idle' | 'loading' | 'online' | 'offline'>('idle');
@@ -582,6 +588,7 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (isDevAuthRequested) return;
     let isMounted = true;
 
     const loadSession = async () => {
@@ -606,7 +613,7 @@ export default function App() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [isDevAuthRequested]);
 
   useEffect(() => {
     if (authStatus !== 'authenticated') return;
