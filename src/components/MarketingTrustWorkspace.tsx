@@ -636,6 +636,14 @@ function resolveAttachmentPreview(item: string, previewRegistry: Record<string, 
   return previewRegistry[item] || previewRegistry[stripAttachmentMeta(item)] || buildExternalAttachmentPreview(item);
 }
 
+function firstExtendedFieldValue(record: EvidenceAsset, keys: string[]) {
+  for (const key of keys) {
+    const value = record.extendedFields?.[key];
+    if (value && String(value).trim()) return value;
+  }
+  return '';
+}
+
 function AttachmentPreviewStrip({
   value,
   previewRegistry = {},
@@ -1823,15 +1831,32 @@ export default function MarketingTrustWorkspace({
     if (!ids.length || Object.keys(patch).length === 0) return;
     const updatedAt = formatDate();
     const nextPatch = { ...patch, updatedAt };
+    const mergeIntoRecord = (record: EvidenceAsset): EvidenceAsset => ({
+      ...record,
+      ...nextPatch,
+      extendedFields: patch.extendedFields
+        ? { ...(record.extendedFields || {}), ...patch.extendedFields }
+        : record.extendedFields,
+    });
     setEvidenceOverrides(current => {
       const next = { ...current };
       ids.forEach(id => {
-        next[id] = { ...(next[id] || {}), ...nextPatch };
+        const currentOverride = next[id] || {};
+        const sourceRecord = evidenceRecords.find(record => record.id === id);
+        const mergedOverride: Partial<EvidenceAsset> = { ...currentOverride, ...nextPatch };
+        if (patch.extendedFields) {
+          mergedOverride.extendedFields = {
+            ...(sourceRecord?.extendedFields || {}),
+            ...(currentOverride.extendedFields || {}),
+            ...patch.extendedFields,
+          };
+        }
+        next[id] = mergedOverride;
       });
       return next;
     });
     setLocalEvidenceAssets(current => current.map(record => (
-      ids.includes(record.id) ? { ...record, ...nextPatch } : record
+      ids.includes(record.id) ? mergeIntoRecord(record) : record
     )));
   };
 
@@ -1862,10 +1887,10 @@ export default function MarketingTrustWorkspace({
     if (!isBatch || editForm.forbiddenClaims.trim()) patch.forbiddenClaims = editForm.forbiddenClaims.trim();
     if (!isBatch || editForm.salesScript.trim()) patch.salesScript = editForm.salesScript.trim();
     if (!isBatch || editForm.tags.trim()) patch.tags = draftTagsToArray(editForm.tags);
+    const extendedEntries = Object.entries(editForm.extendedFields || {})
+      .map(([key, value]) => [key, String(value).trim()] as const);
     const extendedFields = Object.fromEntries(
-      Object.entries(editForm.extendedFields || {})
-        .map(([key, value]) => [key, String(value).trim()] as const)
-        .filter(([, value]) => Boolean(value))
+      isBatch ? extendedEntries.filter(([, value]) => Boolean(value)) : extendedEntries
     );
     if (!isBatch || Object.keys(extendedFields).length > 0) patch.extendedFields = extendedFields;
 
@@ -2723,30 +2748,36 @@ export default function MarketingTrustWorkspace({
                       </td>
                     </tr>
                   )}
-                  {tableRows.map(item => (
-                    <tr key={item.id} onClick={() => setSelectedId(item.id)} className="cursor-pointer hover:bg-blue-50/50">
-                      <td className="px-3 py-2 font-black text-[#071a41]">{item.id}</td>
-                      <td className="px-3 py-2 font-bold text-slate-600">{activeComparisonType}</td>
-                      <td className="px-3 py-2 font-bold text-slate-600">
-                        {item.extendedFields?.hero_image ? (
-                          <AttachmentPreviewStrip value={item.extendedFields.hero_image} previewRegistry={attachmentPreviewRegistry} compact />
-                        ) : '—'}
-                      </td>
-                      <td className="px-3 py-2 font-bold text-slate-600">
-                        {item.extendedFields?.detail_images ? (
-                          <AttachmentPreviewStrip value={item.extendedFields.detail_images} previewRegistry={attachmentPreviewRegistry} compact />
-                        ) : '—'}
-                      </td>
-                      <td className="px-3 py-2 font-bold text-slate-600">
-                        {item.extendedFields?.test_images ? (
-                          <AttachmentPreviewStrip value={item.extendedFields.test_images} previewRegistry={attachmentPreviewRegistry} compact />
-                        ) : '—'}
-                      </td>
-                      <td className="max-w-[220px] px-3 py-2 font-bold text-slate-600">{item.riskBoundary}</td>
-                      <td className="px-3 py-2"><span className={`rounded-full border px-2 py-1 font-black ${toneForTrust(item.trustLevel)}`}>{item.trustLevel}</span></td>
-                      <td className="px-3 py-2 text-blue-600"><Eye className="inline h-4 w-4" /> <Pencil className="inline h-4 w-4" /></td>
-                    </tr>
-                  ))}
+                  {tableRows.map(item => {
+                    const heroValue = firstExtendedFieldValue(item, ['hero_image', 'object_a_image', 'thumbnail', 'video_cover']);
+                    const detailValue = firstExtendedFieldValue(item, ['detail_images', 'object_b_image', 'test_before_image', 'test_after_image']);
+                    const testValue = firstExtendedFieldValue(item, ['test_images', 'raw_video_file', 'edited_video_file', 'report_file', 'supporting_files']);
+
+                    return (
+                      <tr key={item.id} onClick={() => setSelectedId(item.id)} className="cursor-pointer hover:bg-blue-50/50">
+                        <td className="px-3 py-2 font-black text-[#071a41]">{item.id}</td>
+                        <td className="px-3 py-2 font-bold text-slate-600">{activeComparisonType}</td>
+                        <td className="px-3 py-2 font-bold text-slate-600">
+                          {heroValue ? (
+                            <AttachmentPreviewStrip value={heroValue} previewRegistry={attachmentPreviewRegistry} compact />
+                          ) : '—'}
+                        </td>
+                        <td className="px-3 py-2 font-bold text-slate-600">
+                          {detailValue ? (
+                            <AttachmentPreviewStrip value={detailValue} previewRegistry={attachmentPreviewRegistry} compact />
+                          ) : '—'}
+                        </td>
+                        <td className="px-3 py-2 font-bold text-slate-600">
+                          {testValue ? (
+                            <AttachmentPreviewStrip value={testValue} previewRegistry={attachmentPreviewRegistry} compact />
+                          ) : '—'}
+                        </td>
+                        <td className="max-w-[220px] px-3 py-2 font-bold text-slate-600">{item.riskBoundary}</td>
+                        <td className="px-3 py-2"><span className={`rounded-full border px-2 py-1 font-black ${toneForTrust(item.trustLevel)}`}>{item.trustLevel}</span></td>
+                        <td className="px-3 py-2 text-blue-600"><Eye className="inline h-4 w-4" /> <Pencil className="inline h-4 w-4" /></td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
